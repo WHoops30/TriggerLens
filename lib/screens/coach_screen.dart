@@ -102,7 +102,7 @@ class _CoachScreenState extends State<CoachScreen> {
       final String name = _getFirstName();
 
       final systemPrompt = """
-      You are 'Tummy Buddy', the warm, empathetic, and cute AI companion for the TriggerLens app. 
+      You are 'Trick', the warm, empathetic, and cute AI companion for the TriggerLens app. 
       Your goal is to help $name manage their GERD and acid reflux with gentle, encouraging advice. 
       Context: $name is currently in the $phase phase of their acid reflux journey.
       
