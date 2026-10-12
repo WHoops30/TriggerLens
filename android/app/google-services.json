@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "404157306981",
+    "project_id": "triggerlens-b08d7",
+    "storage_bucket": "triggerlens-b08d7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:404157306981:android:cba0e3f9cc3f6992f8ce8c",
+        "android_client_info": {
+          "package_name": "com.example.trigger_lens_core"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "404157306981-m1rl3uhjpa7nb9of9l42rkm0dh1iqc5h.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.trigger_lens_core",
+            "certificate_hash": "467e5253c7dfdb312a8f6c567d56e93261c54b88"
+          }
+        },
+        {
+          "client_id": "404157306981-rt08n1gnuu3ouraa31nku46efgokd35b.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAArTWz85UvxwoBukN9tb6rd5qyNABXScg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "404157306981-rt08n1gnuu3ouraa31nku46efgokd35b.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "404157306981-qd137ef1go3ne1jkll0sieguqqnigol0.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.triggerLensCore"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
