@@ -1,11 +1,14 @@
 import 'package:isar/isar.dart';
 
-// IMPORTANT: This will show a red line until we run the build_runner command later!
 part 'pantry_item.g.dart';
 
 @collection
 class PantryItem {
   Id id = Isar.autoIncrement;
+
+  // NEW: Multi-User Identity Firewall
+  @Index()
+  late String userId;
 
   late String name;
   late DateTime dateScanned;
@@ -13,5 +16,13 @@ class PantryItem {
   late String riskLevel;
   late bool isFavorite;
   late String rawText;
-  late int acidScore; // Used for calculating the 6-hour session risk later
+  late int acidScore;
+
+  String? imagePath;
+
+  // ==========================================
+  // NEW: Consumption Context Multipliers
+  // ==========================================
+  bool isEmptyStomach = false; // If true -> 1.2x Risk Multiplier
+  bool isDiluted = false; // If true -> 0.85x Risk Multiplier
 }

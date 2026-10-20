@@ -1,15 +1,15 @@
+import 'dart:math';
 import '../models/trigger_item.dart';
-import '../models/user_profile.dart'; // REQUIRED: Import the UserProfile
+import '../models/user_profile.dart';
 
-// A helper class to bundle all the results together neatly
 class ScanResult {
   final String cleanedText;
   final List<TriggerItem> detectedTriggers;
-  final String riskLevel; // GREEN, YELLOW, or RED
-  final double
-      finalRiskScore; // Replaced int percentage with double for precise math
+  String
+      riskLevel; // UNLOCKED: Removed 'final' so the scanner can override this
+  final double finalRiskScore;
   final String triggersSummary;
-  final bool exceedsDailyCap; // NEW: Guardrail check
+  final bool exceedsDailyCap;
 
   ScanResult({
     required this.cleanedText,
@@ -22,22 +22,19 @@ class ScanResult {
 }
 
 class KeywordMappingAlgorithm {
-  /// STEP 1: Text Cleaning and Synonym Normalization
+  /// STEP 1: Text Cleaning
   static String cleanRawText(String rawText) {
     String cleaned = rawText.toLowerCase();
 
-    // Fix common OCR number-to-letter hallucinations
-    cleaned = cleaned.replaceAll('1', 'i');
-    cleaned = cleaned.replaceAll('0', 'o');
+    // Fix common OCR number-to-letter hallucinations proactively
     cleaned = cleaned.replaceAll('!', 'i');
     cleaned = cleaned.replaceAll('@', 'a');
-    cleaned = cleaned.replaceAll('5', 's');
 
-    // Remove weird punctuation but keep spaces
-    cleaned = cleaned.replaceAll(RegExp(r'[^a-z\s]'), ' ');
+    // Keep numbers and letters, strip weird punctuation
+    cleaned = cleaned.replaceAll(RegExp(r'[^a-z0-9\s]'), ' ');
     cleaned = cleaned.replaceAll(RegExp(r'\s+'), ' ');
 
-    // MEDICAL SYNONYM MAPPING (Translate complex names to Core Triggers)
+    // MEDICAL SYNONYM MAPPING
     cleaned = cleaned.replaceAll('ascorbic acid', 'vitamin c');
     cleaned = cleaned.replaceAll('sodium ascorbate', 'vitamin c');
     cleaned = cleaned.replaceAll('whey powder', 'milk');
@@ -48,42 +45,92 @@ class KeywordMappingAlgorithm {
     return cleaned.trim();
   }
 
-  /// STEP 2: The Dynamic Matching & Scoring Logic
-  static ScanResult analyze(
-      String rawText,
-      List<TriggerItem> databaseTriggers,
-      UserProfile? userProfile, // NEW: We need the user's phase
-      double
-          currentDailyAccumulatedLoad // NEW: We need to know what they've drank today
-      ) {
+  /// STEP 2: The Levenshtein Distance Function (Fuzzy Matching Engine)
+  static int levenshtein(String a, String b) {
+    if (a.isEmpty) return b.length;
+    if (b.isEmpty) return a.length;
+
+    List<int> v0 = List<int>.generate(b.length + 1, (i) => i);
+    List<int> v1 = List<int>.filled(b.length + 1, 0);
+
+    for (int i = 0; i < a.length; i++) {
+      v1[0] = i + 1;
+      for (int j = 0; j < b.length; j++) {
+        int cost = (a[i] == b[j]) ? 0 : 1;
+        v1[j + 1] = min(v1[j] + 1, min(v0[j + 1] + 1, v0[j] + cost));
+      }
+      for (int j = 0; j < v0.length; j++) {
+        v0[j] = v1[j];
+      }
+    }
+    return v1[b.length];
+  }
+
+  /// STEP 3: Sliding Window Fuzzy Search
+  static bool fuzzyContains(String text, String trigger) {
+    if (text.contains(trigger)) return true;
+
+    int maxTypos = (trigger.length / 4).floor();
+    if (maxTypos < 1) maxTypos = 1;
+    if (maxTypos > 3) maxTypos = 3;
+
+    List<String> textWords = text.split(RegExp(r'\s+'));
+    List<String> triggerWords = trigger.split(RegExp(r'\s+'));
+    int n = triggerWords.length;
+
+    if (textWords.length < n) return false;
+
+    for (int i = 0; i <= textWords.length - n; i++) {
+      String window = textWords.sublist(i, i + n).join(' ');
+      if (levenshtein(window, trigger) <= maxTypos) {
+        return true;
+      }
+    }
+
+    if (n > 1) {
+      for (int i = 0; i <= textWords.length - (n - 1); i++) {
+        String window = textWords.sublist(i, i + (n - 1)).join('');
+        if (levenshtein(window, trigger.replaceAll(' ', '')) <= maxTypos) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /// STEP 4: The Dynamic Multi-Attribute Scoring Logic (UPDATED FOR BIOLOGY)
+  static ScanResult analyze(String rawText, List<TriggerItem> databaseTriggers,
+      UserProfile? userProfile, double currentDailyAccumulatedLoad,
+      {bool isEmptyStomach = false, bool isDiluted = false}) {
+    // NEW PARAMETERS
+
     String cleanedText = cleanRawText(rawText);
     List<TriggerItem> detectedTriggers = [];
     List<String> seenNames = [];
 
-    // 1. BUILT-IN CORE MEDICAL DICTIONARY (Updated to Base Acid Scores out of 10)
+    // CORE MEDICAL DICTIONARY
     final Map<String, double> coreDictionary = {
-      'citric acid': 9.0, // High Risk
-      'vitamin c': 9.0, // High Risk
-      'caffeine': 8.0, // High Risk
-      'coffee': 8.0, // High Risk
-      'palm oil': 7.0, // High Risk
-      'creamer': 7.0, // High Risk
-      'milk': 5.0, // Medium Risk
-      'skimmed milk': 5.0, // Medium Risk
-      'chocolate': 5.0, // Medium Risk
-      'sugar': 2.0, // Low Risk
-      'salt': 2.0, // Low Risk
+      'citric acid': 9.0,
+      'vitamin c': 9.0,
+      'caffeine': 8.0,
+      'coffee': 8.0,
+      'palm oil': 7.0,
+      'creamer': 7.0,
+      'milk': 5.0,
+      'skimmed milk': 5.0,
+      'chocolate': 5.0,
+      'sugar': 2.0,
+      'salt': 2.0,
     };
 
-    // Scan against the Core Dictionary first
-    double highestBaseScore =
-        0.0; // We take the highest risk item found as the base score
+    double highestBaseScore = 0.0;
 
+    // Scan against Core Dictionary
     coreDictionary.forEach((ingredient, baseScore) {
-      if (cleanedText.contains(ingredient)) {
+      if (fuzzyContains(cleanedText, ingredient)) {
         seenNames.add(ingredient);
 
-        // Map numbers back to text for the UI Display
         String severityText = "Low";
         if (baseScore >= 7)
           severityText = "High Risk";
@@ -94,20 +141,17 @@ class KeywordMappingAlgorithm {
           ..riskLevel = severityText
           ..category = 'Built-in');
 
-        if (baseScore > highestBaseScore) {
-          highestBaseScore = baseScore;
-        }
+        if (baseScore > highestBaseScore) highestBaseScore = baseScore;
       }
     });
 
-    // Scan against User Database
+    // Scan against Custom User Database
     for (var trigger in databaseTriggers) {
       String name = trigger.name.toLowerCase();
-      if (cleanedText.contains(name) && !seenNames.contains(name)) {
+      if (fuzzyContains(cleanedText, name) && !seenNames.contains(name)) {
         seenNames.add(name);
         detectedTriggers.add(trigger);
 
-        // Estimate a base score for custom items if they are dangerous
         if (trigger.riskLevel.toLowerCase().contains('high') &&
             highestBaseScore < 7) {
           highestBaseScore = 7.0;
@@ -118,42 +162,49 @@ class KeywordMappingAlgorithm {
       }
     }
 
-    // Default safety base score if nothing is found
-    if (highestBaseScore == 0.0) {
-      highestBaseScore = 1.0;
-    }
+    if (highestBaseScore == 0.0) highestBaseScore = 1.0;
 
-    // 2. DYNAMIC MULTI-ATTRIBUTE ALGORITHM
-    // Default to Maintenance (1.0) and standard cap (15) if profile isn't loaded yet
+    // ==========================================
+    // NEW: BIOLOGICAL MULTIPLIERS
+    // ==========================================
     double sensitivityMultiplier = userProfile?.multiplier ?? 1.0;
-    int dailyCap = userProfile?.dailyCap ?? 15;
 
-    // STEP 1: Compute Individual Adjusted Risk Score
+    // 1. Base Score * General Sensitivity Phase
     double finalRiskScore = highestBaseScore * sensitivityMultiplier;
 
-    // STEP 2: Session and Daily Cumulative Threshold Guardrail
+    // 2. Immediate Context Modifiers
+    if (isEmptyStomach) {
+      finalRiskScore *= 1.2; // 20% penalty for empty stomach
+    }
+    if (isDiluted) {
+      finalRiskScore *= 0.85; // 15% safety buffer for dilution
+    }
+
+    // Use the new dynamic cap instead of the old int cap
+    double activeDailyCap = userProfile?.dynamicDailyCap ?? 15.0;
+
     double projectedDailyLoad = currentDailyAccumulatedLoad + finalRiskScore;
 
     String uiColor = "GREEN";
     String warningMessage = "Safe to Consume.";
     bool exceedsCap = false;
 
-    if (projectedDailyLoad > dailyCap) {
+    // Liability-safe phrasing applied here
+    if (projectedDailyLoad > activeDailyCap) {
       uiColor = "RED";
       warningMessage =
-          "Daily Limit Exceeded: Consuming this item breaches your personalized safe acid threshold for today.";
+          "Pacing Warning: Consuming this item breaches your theoretical safe acid threshold for today.";
       exceedsCap = true;
     } else if (finalRiskScore > 7) {
       uiColor = "RED";
       warningMessage =
-          "High Risk: Elevated acid load detected for your current sensitivity state.";
+          "High Risk: Elevated acid load detected. Your stomach may be sensitive to this right now.";
     } else if (finalRiskScore > 4) {
       uiColor = "YELLOW";
       warningMessage =
-          "Moderate Risk: Proceed with caution or dilute with water.";
+          "Moderate Risk: Proceed with caution or consider diluting with water.";
     }
 
-    // 4. SUMMARY GENERATION FOR UI
     String summary = detectedTriggers.isEmpty
         ? "No known acid reflux triggers detected."
         : "Known triggers detected: ${detectedTriggers.map((e) => e.name).join(', ')}. $warningMessage";
@@ -161,7 +212,7 @@ class KeywordMappingAlgorithm {
     return ScanResult(
       cleanedText: cleanedText,
       detectedTriggers: detectedTriggers,
-      riskLevel: uiColor, // Changed to return the color code
+      riskLevel: uiColor,
       finalRiskScore: finalRiskScore,
       triggersSummary: summary,
       exceedsDailyCap: exceedsCap,

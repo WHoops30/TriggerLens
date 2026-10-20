@@ -31,6 +31,11 @@ const ConsumptionLogSchema = CollectionSchema(
       id: 2,
       name: r'productDetails',
       type: IsarType.string,
+    ),
+    r'userId': PropertySchema(
+      id: 3,
+      name: r'userId',
+      type: IsarType.string,
     )
   },
   estimateSize: _consumptionLogEstimateSize,
@@ -38,7 +43,21 @@ const ConsumptionLogSchema = CollectionSchema(
   deserialize: _consumptionLogDeserialize,
   deserializeProp: _consumptionLogDeserializeProp,
   idName: r'id',
-  indexes: {},
+  indexes: {
+    r'userId': IndexSchema(
+      id: -2005826577402374815,
+      name: r'userId',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'userId',
+          type: IndexType.hash,
+          caseSensitive: true,
+        )
+      ],
+    )
+  },
   links: {},
   embeddedSchemas: {},
   getId: _consumptionLogGetId,
@@ -54,6 +73,7 @@ int _consumptionLogEstimateSize(
 ) {
   var bytesCount = offsets.last;
   bytesCount += 3 + object.productDetails.length * 3;
+  bytesCount += 3 + object.userId.length * 3;
   return bytesCount;
 }
 
@@ -66,6 +86,7 @@ void _consumptionLogSerialize(
   writer.writeLong(offsets[0], object.acidScore);
   writer.writeDateTime(offsets[1], object.consumedAt);
   writer.writeString(offsets[2], object.productDetails);
+  writer.writeString(offsets[3], object.userId);
 }
 
 ConsumptionLog _consumptionLogDeserialize(
@@ -79,6 +100,7 @@ ConsumptionLog _consumptionLogDeserialize(
   object.consumedAt = reader.readDateTime(offsets[1]);
   object.id = id;
   object.productDetails = reader.readString(offsets[2]);
+  object.userId = reader.readString(offsets[3]);
   return object;
 }
 
@@ -94,6 +116,8 @@ P _consumptionLogDeserializeProp<P>(
     case 1:
       return (reader.readDateTime(offset)) as P;
     case 2:
+      return (reader.readString(offset)) as P;
+    case 3:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -190,6 +214,51 @@ extension ConsumptionLogQueryWhere
         upper: upperId,
         includeUpper: includeUpper,
       ));
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterWhereClause> userIdEqualTo(
+      String userId) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.equalTo(
+        indexName: r'userId',
+        value: [userId],
+      ));
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterWhereClause>
+      userIdNotEqualTo(String userId) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [],
+              upper: [userId],
+              includeUpper: false,
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [userId],
+              includeLower: false,
+              upper: [],
+            ));
+      } else {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [userId],
+              includeLower: false,
+              upper: [],
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [],
+              upper: [userId],
+              includeUpper: false,
+            ));
+      }
     });
   }
 }
@@ -498,6 +567,142 @@ extension ConsumptionLogQueryFilter
       ));
     });
   }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterFilterCondition>
+      userIdEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterFilterCondition>
+      userIdGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterFilterCondition>
+      userIdLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterFilterCondition>
+      userIdBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'userId',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterFilterCondition>
+      userIdStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterFilterCondition>
+      userIdEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterFilterCondition>
+      userIdContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterFilterCondition>
+      userIdMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'userId',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterFilterCondition>
+      userIdIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'userId',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterFilterCondition>
+      userIdIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'userId',
+        value: '',
+      ));
+    });
+  }
 }
 
 extension ConsumptionLogQueryObject
@@ -546,6 +751,19 @@ extension ConsumptionLogQuerySortBy
       sortByProductDetailsDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'productDetails', Sort.desc);
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterSortBy> sortByUserId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterSortBy>
+      sortByUserIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.desc);
     });
   }
 }
@@ -604,6 +822,19 @@ extension ConsumptionLogQuerySortThenBy
       return query.addSortBy(r'productDetails', Sort.desc);
     });
   }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterSortBy> thenByUserId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QAfterSortBy>
+      thenByUserIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.desc);
+    });
+  }
 }
 
 extension ConsumptionLogQueryWhereDistinct
@@ -627,6 +858,13 @@ extension ConsumptionLogQueryWhereDistinct
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'productDetails',
           caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, ConsumptionLog, QDistinct> distinctByUserId(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'userId', caseSensitive: caseSensitive);
     });
   }
 }
@@ -656,6 +894,12 @@ extension ConsumptionLogQueryProperty
       productDetailsProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'productDetails');
+    });
+  }
+
+  QueryBuilder<ConsumptionLog, String, QQueryOperations> userIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'userId');
     });
   }
 }

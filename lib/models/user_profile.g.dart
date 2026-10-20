@@ -17,19 +17,59 @@ const UserProfileSchema = CollectionSchema(
   name: r'UserProfile',
   id: 4738427352541298891,
   properties: {
-    r'dailyCap': PropertySchema(
+    r'baseDailyCap': PropertySchema(
       id: 0,
+      name: r'baseDailyCap',
+      type: IsarType.double,
+    ),
+    r'baselineStrictnessIndex': PropertySchema(
+      id: 1,
+      name: r'baselineStrictnessIndex',
+      type: IsarType.long,
+    ),
+    r'cloudSyncEnabled': PropertySchema(
+      id: 2,
+      name: r'cloudSyncEnabled',
+      type: IsarType.bool,
+    ),
+    r'dailyCap': PropertySchema(
+      id: 3,
       name: r'dailyCap',
       type: IsarType.long,
     ),
+    r'dynamicDailyCap': PropertySchema(
+      id: 4,
+      name: r'dynamicDailyCap',
+      type: IsarType.double,
+    ),
+    r'goalIndex': PropertySchema(
+      id: 5,
+      name: r'goalIndex',
+      type: IsarType.long,
+    ),
     r'multiplier': PropertySchema(
-      id: 1,
+      id: 6,
       name: r'multiplier',
       type: IsarType.double,
     ),
     r'phase': PropertySchema(
-      id: 2,
+      id: 7,
       name: r'phase',
+      type: IsarType.string,
+    ),
+    r'refluxFrequencyIndex': PropertySchema(
+      id: 8,
+      name: r'refluxFrequencyIndex',
+      type: IsarType.long,
+    ),
+    r'targetDailyPral': PropertySchema(
+      id: 9,
+      name: r'targetDailyPral',
+      type: IsarType.double,
+    ),
+    r'userId': PropertySchema(
+      id: 10,
+      name: r'userId',
       type: IsarType.string,
     )
   },
@@ -38,7 +78,21 @@ const UserProfileSchema = CollectionSchema(
   deserialize: _userProfileDeserialize,
   deserializeProp: _userProfileDeserializeProp,
   idName: r'id',
-  indexes: {},
+  indexes: {
+    r'userId': IndexSchema(
+      id: -2005826577402374815,
+      name: r'userId',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'userId',
+          type: IndexType.hash,
+          caseSensitive: true,
+        )
+      ],
+    )
+  },
   links: {},
   embeddedSchemas: {},
   getId: _userProfileGetId,
@@ -54,6 +108,7 @@ int _userProfileEstimateSize(
 ) {
   var bytesCount = offsets.last;
   bytesCount += 3 + object.phase.length * 3;
+  bytesCount += 3 + object.userId.length * 3;
   return bytesCount;
 }
 
@@ -63,9 +118,17 @@ void _userProfileSerialize(
   List<int> offsets,
   Map<Type, List<int>> allOffsets,
 ) {
-  writer.writeLong(offsets[0], object.dailyCap);
-  writer.writeDouble(offsets[1], object.multiplier);
-  writer.writeString(offsets[2], object.phase);
+  writer.writeDouble(offsets[0], object.baseDailyCap);
+  writer.writeLong(offsets[1], object.baselineStrictnessIndex);
+  writer.writeBool(offsets[2], object.cloudSyncEnabled);
+  writer.writeLong(offsets[3], object.dailyCap);
+  writer.writeDouble(offsets[4], object.dynamicDailyCap);
+  writer.writeLong(offsets[5], object.goalIndex);
+  writer.writeDouble(offsets[6], object.multiplier);
+  writer.writeString(offsets[7], object.phase);
+  writer.writeLong(offsets[8], object.refluxFrequencyIndex);
+  writer.writeDouble(offsets[9], object.targetDailyPral);
+  writer.writeString(offsets[10], object.userId);
 }
 
 UserProfile _userProfileDeserialize(
@@ -75,10 +138,18 @@ UserProfile _userProfileDeserialize(
   Map<Type, List<int>> allOffsets,
 ) {
   final object = UserProfile();
-  object.dailyCap = reader.readLong(offsets[0]);
+  object.baseDailyCap = reader.readDouble(offsets[0]);
+  object.baselineStrictnessIndex = reader.readLong(offsets[1]);
+  object.cloudSyncEnabled = reader.readBool(offsets[2]);
+  object.dailyCap = reader.readLong(offsets[3]);
+  object.dynamicDailyCap = reader.readDouble(offsets[4]);
+  object.goalIndex = reader.readLong(offsets[5]);
   object.id = id;
-  object.multiplier = reader.readDouble(offsets[1]);
-  object.phase = reader.readString(offsets[2]);
+  object.multiplier = reader.readDouble(offsets[6]);
+  object.phase = reader.readString(offsets[7]);
+  object.refluxFrequencyIndex = reader.readLong(offsets[8]);
+  object.targetDailyPral = reader.readDouble(offsets[9]);
+  object.userId = reader.readString(offsets[10]);
   return object;
 }
 
@@ -90,10 +161,26 @@ P _userProfileDeserializeProp<P>(
 ) {
   switch (propertyId) {
     case 0:
-      return (reader.readLong(offset)) as P;
-    case 1:
       return (reader.readDouble(offset)) as P;
+    case 1:
+      return (reader.readLong(offset)) as P;
     case 2:
+      return (reader.readBool(offset)) as P;
+    case 3:
+      return (reader.readLong(offset)) as P;
+    case 4:
+      return (reader.readDouble(offset)) as P;
+    case 5:
+      return (reader.readLong(offset)) as P;
+    case 6:
+      return (reader.readDouble(offset)) as P;
+    case 7:
+      return (reader.readString(offset)) as P;
+    case 8:
+      return (reader.readLong(offset)) as P;
+    case 9:
+      return (reader.readDouble(offset)) as P;
+    case 10:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -189,10 +276,187 @@ extension UserProfileQueryWhere
       ));
     });
   }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterWhereClause> userIdEqualTo(
+      String userId) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.equalTo(
+        indexName: r'userId',
+        value: [userId],
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterWhereClause> userIdNotEqualTo(
+      String userId) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [],
+              upper: [userId],
+              includeUpper: false,
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [userId],
+              includeLower: false,
+              upper: [],
+            ));
+      } else {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [userId],
+              includeLower: false,
+              upper: [],
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [],
+              upper: [userId],
+              includeUpper: false,
+            ));
+      }
+    });
+  }
 }
 
 extension UserProfileQueryFilter
     on QueryBuilder<UserProfile, UserProfile, QFilterCondition> {
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      baseDailyCapEqualTo(
+    double value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'baseDailyCap',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      baseDailyCapGreaterThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'baseDailyCap',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      baseDailyCapLessThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'baseDailyCap',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      baseDailyCapBetween(
+    double lower,
+    double upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'baseDailyCap',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      baselineStrictnessIndexEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'baselineStrictnessIndex',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      baselineStrictnessIndexGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'baselineStrictnessIndex',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      baselineStrictnessIndexLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'baselineStrictnessIndex',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      baselineStrictnessIndexBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'baselineStrictnessIndex',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      cloudSyncEnabledEqualTo(bool value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'cloudSyncEnabled',
+        value: value,
+      ));
+    });
+  }
+
   QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition> dailyCapEqualTo(
       int value) {
     return QueryBuilder.apply(this, (query) {
@@ -240,6 +504,128 @@ extension UserProfileQueryFilter
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.between(
         property: r'dailyCap',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      dynamicDailyCapEqualTo(
+    double value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'dynamicDailyCap',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      dynamicDailyCapGreaterThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'dynamicDailyCap',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      dynamicDailyCapLessThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'dynamicDailyCap',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      dynamicDailyCapBetween(
+    double lower,
+    double upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'dynamicDailyCap',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      goalIndexEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'goalIndex',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      goalIndexGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'goalIndex',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      goalIndexLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'goalIndex',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      goalIndexBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'goalIndex',
         lower: lower,
         includeLower: includeLower,
         upper: upper,
@@ -498,6 +884,262 @@ extension UserProfileQueryFilter
       ));
     });
   }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      refluxFrequencyIndexEqualTo(int value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'refluxFrequencyIndex',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      refluxFrequencyIndexGreaterThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'refluxFrequencyIndex',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      refluxFrequencyIndexLessThan(
+    int value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'refluxFrequencyIndex',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      refluxFrequencyIndexBetween(
+    int lower,
+    int upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'refluxFrequencyIndex',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      targetDailyPralEqualTo(
+    double value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'targetDailyPral',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      targetDailyPralGreaterThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'targetDailyPral',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      targetDailyPralLessThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'targetDailyPral',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      targetDailyPralBetween(
+    double lower,
+    double upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'targetDailyPral',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition> userIdEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      userIdGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition> userIdLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition> userIdBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'userId',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      userIdStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition> userIdEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition> userIdContains(
+      String value,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition> userIdMatches(
+      String pattern,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'userId',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      userIdIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'userId',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterFilterCondition>
+      userIdIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'userId',
+        value: '',
+      ));
+    });
+  }
 }
 
 extension UserProfileQueryObject
@@ -508,6 +1150,47 @@ extension UserProfileQueryLinks
 
 extension UserProfileQuerySortBy
     on QueryBuilder<UserProfile, UserProfile, QSortBy> {
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> sortByBaseDailyCap() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'baseDailyCap', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      sortByBaseDailyCapDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'baseDailyCap', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      sortByBaselineStrictnessIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'baselineStrictnessIndex', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      sortByBaselineStrictnessIndexDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'baselineStrictnessIndex', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      sortByCloudSyncEnabled() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'cloudSyncEnabled', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      sortByCloudSyncEnabledDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'cloudSyncEnabled', Sort.desc);
+    });
+  }
+
   QueryBuilder<UserProfile, UserProfile, QAfterSortBy> sortByDailyCap() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'dailyCap', Sort.asc);
@@ -517,6 +1200,31 @@ extension UserProfileQuerySortBy
   QueryBuilder<UserProfile, UserProfile, QAfterSortBy> sortByDailyCapDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'dailyCap', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> sortByDynamicDailyCap() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'dynamicDailyCap', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      sortByDynamicDailyCapDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'dynamicDailyCap', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> sortByGoalIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'goalIndex', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> sortByGoalIndexDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'goalIndex', Sort.desc);
     });
   }
 
@@ -543,10 +1251,90 @@ extension UserProfileQuerySortBy
       return query.addSortBy(r'phase', Sort.desc);
     });
   }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      sortByRefluxFrequencyIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'refluxFrequencyIndex', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      sortByRefluxFrequencyIndexDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'refluxFrequencyIndex', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> sortByTargetDailyPral() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'targetDailyPral', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      sortByTargetDailyPralDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'targetDailyPral', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> sortByUserId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> sortByUserIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.desc);
+    });
+  }
 }
 
 extension UserProfileQuerySortThenBy
     on QueryBuilder<UserProfile, UserProfile, QSortThenBy> {
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> thenByBaseDailyCap() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'baseDailyCap', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      thenByBaseDailyCapDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'baseDailyCap', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      thenByBaselineStrictnessIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'baselineStrictnessIndex', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      thenByBaselineStrictnessIndexDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'baselineStrictnessIndex', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      thenByCloudSyncEnabled() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'cloudSyncEnabled', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      thenByCloudSyncEnabledDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'cloudSyncEnabled', Sort.desc);
+    });
+  }
+
   QueryBuilder<UserProfile, UserProfile, QAfterSortBy> thenByDailyCap() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'dailyCap', Sort.asc);
@@ -556,6 +1344,31 @@ extension UserProfileQuerySortThenBy
   QueryBuilder<UserProfile, UserProfile, QAfterSortBy> thenByDailyCapDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'dailyCap', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> thenByDynamicDailyCap() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'dynamicDailyCap', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      thenByDynamicDailyCapDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'dynamicDailyCap', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> thenByGoalIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'goalIndex', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> thenByGoalIndexDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'goalIndex', Sort.desc);
     });
   }
 
@@ -594,13 +1407,85 @@ extension UserProfileQuerySortThenBy
       return query.addSortBy(r'phase', Sort.desc);
     });
   }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      thenByRefluxFrequencyIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'refluxFrequencyIndex', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      thenByRefluxFrequencyIndexDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'refluxFrequencyIndex', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> thenByTargetDailyPral() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'targetDailyPral', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy>
+      thenByTargetDailyPralDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'targetDailyPral', Sort.desc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> thenByUserId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QAfterSortBy> thenByUserIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.desc);
+    });
+  }
 }
 
 extension UserProfileQueryWhereDistinct
     on QueryBuilder<UserProfile, UserProfile, QDistinct> {
+  QueryBuilder<UserProfile, UserProfile, QDistinct> distinctByBaseDailyCap() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'baseDailyCap');
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QDistinct>
+      distinctByBaselineStrictnessIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'baselineStrictnessIndex');
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QDistinct>
+      distinctByCloudSyncEnabled() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'cloudSyncEnabled');
+    });
+  }
+
   QueryBuilder<UserProfile, UserProfile, QDistinct> distinctByDailyCap() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'dailyCap');
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QDistinct>
+      distinctByDynamicDailyCap() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'dynamicDailyCap');
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QDistinct> distinctByGoalIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'goalIndex');
     });
   }
 
@@ -616,6 +1501,27 @@ extension UserProfileQueryWhereDistinct
       return query.addDistinctBy(r'phase', caseSensitive: caseSensitive);
     });
   }
+
+  QueryBuilder<UserProfile, UserProfile, QDistinct>
+      distinctByRefluxFrequencyIndex() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'refluxFrequencyIndex');
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QDistinct>
+      distinctByTargetDailyPral() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'targetDailyPral');
+    });
+  }
+
+  QueryBuilder<UserProfile, UserProfile, QDistinct> distinctByUserId(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'userId', caseSensitive: caseSensitive);
+    });
+  }
 }
 
 extension UserProfileQueryProperty
@@ -626,9 +1532,41 @@ extension UserProfileQueryProperty
     });
   }
 
+  QueryBuilder<UserProfile, double, QQueryOperations> baseDailyCapProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'baseDailyCap');
+    });
+  }
+
+  QueryBuilder<UserProfile, int, QQueryOperations>
+      baselineStrictnessIndexProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'baselineStrictnessIndex');
+    });
+  }
+
+  QueryBuilder<UserProfile, bool, QQueryOperations> cloudSyncEnabledProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'cloudSyncEnabled');
+    });
+  }
+
   QueryBuilder<UserProfile, int, QQueryOperations> dailyCapProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'dailyCap');
+    });
+  }
+
+  QueryBuilder<UserProfile, double, QQueryOperations>
+      dynamicDailyCapProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'dynamicDailyCap');
+    });
+  }
+
+  QueryBuilder<UserProfile, int, QQueryOperations> goalIndexProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'goalIndex');
     });
   }
 
@@ -641,6 +1579,26 @@ extension UserProfileQueryProperty
   QueryBuilder<UserProfile, String, QQueryOperations> phaseProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'phase');
+    });
+  }
+
+  QueryBuilder<UserProfile, int, QQueryOperations>
+      refluxFrequencyIndexProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'refluxFrequencyIndex');
+    });
+  }
+
+  QueryBuilder<UserProfile, double, QQueryOperations>
+      targetDailyPralProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'targetDailyPral');
+    });
+  }
+
+  QueryBuilder<UserProfile, String, QQueryOperations> userIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'userId');
     });
   }
 }

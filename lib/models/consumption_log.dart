@@ -6,6 +6,10 @@ part 'consumption_log.g.dart';
 class ConsumptionLog {
   Id id = Isar.autoIncrement;
 
+  // NEW: Multi-User Identity Firewall
+  @Index()
+  late String userId;
+
   late DateTime consumedAt;
 
   // The calculated acid risk of the product (e.g., 1 = Low, 2 = Mod, 3 = High)

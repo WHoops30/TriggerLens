@@ -27,29 +27,49 @@ const PantryItemSchema = CollectionSchema(
       name: r'dateScanned',
       type: IsarType.dateTime,
     ),
-    r'isFavorite': PropertySchema(
+    r'imagePath': PropertySchema(
       id: 2,
+      name: r'imagePath',
+      type: IsarType.string,
+    ),
+    r'isDiluted': PropertySchema(
+      id: 3,
+      name: r'isDiluted',
+      type: IsarType.bool,
+    ),
+    r'isEmptyStomach': PropertySchema(
+      id: 4,
+      name: r'isEmptyStomach',
+      type: IsarType.bool,
+    ),
+    r'isFavorite': PropertySchema(
+      id: 5,
       name: r'isFavorite',
       type: IsarType.bool,
     ),
     r'name': PropertySchema(
-      id: 3,
+      id: 6,
       name: r'name',
       type: IsarType.string,
     ),
     r'rawText': PropertySchema(
-      id: 4,
+      id: 7,
       name: r'rawText',
       type: IsarType.string,
     ),
     r'riskLevel': PropertySchema(
-      id: 5,
+      id: 8,
       name: r'riskLevel',
       type: IsarType.string,
     ),
     r'symptoms': PropertySchema(
-      id: 6,
+      id: 9,
       name: r'symptoms',
+      type: IsarType.string,
+    ),
+    r'userId': PropertySchema(
+      id: 10,
+      name: r'userId',
       type: IsarType.string,
     )
   },
@@ -58,7 +78,21 @@ const PantryItemSchema = CollectionSchema(
   deserialize: _pantryItemDeserialize,
   deserializeProp: _pantryItemDeserializeProp,
   idName: r'id',
-  indexes: {},
+  indexes: {
+    r'userId': IndexSchema(
+      id: -2005826577402374815,
+      name: r'userId',
+      unique: false,
+      replace: false,
+      properties: [
+        IndexPropertySchema(
+          name: r'userId',
+          type: IndexType.hash,
+          caseSensitive: true,
+        )
+      ],
+    )
+  },
   links: {},
   embeddedSchemas: {},
   getId: _pantryItemGetId,
@@ -73,10 +107,17 @@ int _pantryItemEstimateSize(
   Map<Type, List<int>> allOffsets,
 ) {
   var bytesCount = offsets.last;
+  {
+    final value = object.imagePath;
+    if (value != null) {
+      bytesCount += 3 + value.length * 3;
+    }
+  }
   bytesCount += 3 + object.name.length * 3;
   bytesCount += 3 + object.rawText.length * 3;
   bytesCount += 3 + object.riskLevel.length * 3;
   bytesCount += 3 + object.symptoms.length * 3;
+  bytesCount += 3 + object.userId.length * 3;
   return bytesCount;
 }
 
@@ -88,11 +129,15 @@ void _pantryItemSerialize(
 ) {
   writer.writeLong(offsets[0], object.acidScore);
   writer.writeDateTime(offsets[1], object.dateScanned);
-  writer.writeBool(offsets[2], object.isFavorite);
-  writer.writeString(offsets[3], object.name);
-  writer.writeString(offsets[4], object.rawText);
-  writer.writeString(offsets[5], object.riskLevel);
-  writer.writeString(offsets[6], object.symptoms);
+  writer.writeString(offsets[2], object.imagePath);
+  writer.writeBool(offsets[3], object.isDiluted);
+  writer.writeBool(offsets[4], object.isEmptyStomach);
+  writer.writeBool(offsets[5], object.isFavorite);
+  writer.writeString(offsets[6], object.name);
+  writer.writeString(offsets[7], object.rawText);
+  writer.writeString(offsets[8], object.riskLevel);
+  writer.writeString(offsets[9], object.symptoms);
+  writer.writeString(offsets[10], object.userId);
 }
 
 PantryItem _pantryItemDeserialize(
@@ -105,11 +150,15 @@ PantryItem _pantryItemDeserialize(
   object.acidScore = reader.readLong(offsets[0]);
   object.dateScanned = reader.readDateTime(offsets[1]);
   object.id = id;
-  object.isFavorite = reader.readBool(offsets[2]);
-  object.name = reader.readString(offsets[3]);
-  object.rawText = reader.readString(offsets[4]);
-  object.riskLevel = reader.readString(offsets[5]);
-  object.symptoms = reader.readString(offsets[6]);
+  object.imagePath = reader.readStringOrNull(offsets[2]);
+  object.isDiluted = reader.readBool(offsets[3]);
+  object.isEmptyStomach = reader.readBool(offsets[4]);
+  object.isFavorite = reader.readBool(offsets[5]);
+  object.name = reader.readString(offsets[6]);
+  object.rawText = reader.readString(offsets[7]);
+  object.riskLevel = reader.readString(offsets[8]);
+  object.symptoms = reader.readString(offsets[9]);
+  object.userId = reader.readString(offsets[10]);
   return object;
 }
 
@@ -125,14 +174,22 @@ P _pantryItemDeserializeProp<P>(
     case 1:
       return (reader.readDateTime(offset)) as P;
     case 2:
-      return (reader.readBool(offset)) as P;
+      return (reader.readStringOrNull(offset)) as P;
     case 3:
-      return (reader.readString(offset)) as P;
+      return (reader.readBool(offset)) as P;
     case 4:
-      return (reader.readString(offset)) as P;
+      return (reader.readBool(offset)) as P;
     case 5:
-      return (reader.readString(offset)) as P;
+      return (reader.readBool(offset)) as P;
     case 6:
+      return (reader.readString(offset)) as P;
+    case 7:
+      return (reader.readString(offset)) as P;
+    case 8:
+      return (reader.readString(offset)) as P;
+    case 9:
+      return (reader.readString(offset)) as P;
+    case 10:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -224,6 +281,51 @@ extension PantryItemQueryWhere
         upper: upperId,
         includeUpper: includeUpper,
       ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterWhereClause> userIdEqualTo(
+      String userId) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addWhereClause(IndexWhereClause.equalTo(
+        indexName: r'userId',
+        value: [userId],
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterWhereClause> userIdNotEqualTo(
+      String userId) {
+    return QueryBuilder.apply(this, (query) {
+      if (query.whereSort == Sort.asc) {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [],
+              upper: [userId],
+              includeUpper: false,
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [userId],
+              includeLower: false,
+              upper: [],
+            ));
+      } else {
+        return query
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [userId],
+              includeLower: false,
+              upper: [],
+            ))
+            .addWhereClause(IndexWhereClause.between(
+              indexName: r'userId',
+              lower: [],
+              upper: [userId],
+              includeUpper: false,
+            ));
+      }
     });
   }
 }
@@ -389,6 +491,178 @@ extension PantryItemQueryFilter
         includeLower: includeLower,
         upper: upper,
         includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      imagePathIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'imagePath',
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      imagePathIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'imagePath',
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> imagePathEqualTo(
+    String? value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'imagePath',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      imagePathGreaterThan(
+    String? value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'imagePath',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> imagePathLessThan(
+    String? value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'imagePath',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> imagePathBetween(
+    String? lower,
+    String? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'imagePath',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      imagePathStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'imagePath',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> imagePathEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'imagePath',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> imagePathContains(
+      String value,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'imagePath',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> imagePathMatches(
+      String pattern,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'imagePath',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      imagePathIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'imagePath',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      imagePathIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'imagePath',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> isDilutedEqualTo(
+      bool value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'isDiluted',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      isEmptyStomachEqualTo(bool value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'isEmptyStomach',
+        value: value,
       ));
     });
   }
@@ -932,6 +1206,137 @@ extension PantryItemQueryFilter
       ));
     });
   }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> userIdEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> userIdGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> userIdLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> userIdBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'userId',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> userIdStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> userIdEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> userIdContains(
+      String value,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'userId',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> userIdMatches(
+      String pattern,
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'userId',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> userIdIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'userId',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      userIdIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'userId',
+        value: '',
+      ));
+    });
+  }
 }
 
 extension PantryItemQueryObject
@@ -963,6 +1368,43 @@ extension PantryItemQuerySortBy
   QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByDateScannedDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'dateScanned', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByImagePath() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'imagePath', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByImagePathDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'imagePath', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByIsDiluted() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDiluted', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByIsDilutedDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDiluted', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByIsEmptyStomach() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isEmptyStomach', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy>
+      sortByIsEmptyStomachDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isEmptyStomach', Sort.desc);
     });
   }
 
@@ -1025,6 +1467,18 @@ extension PantryItemQuerySortBy
       return query.addSortBy(r'symptoms', Sort.desc);
     });
   }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByUserId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByUserIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.desc);
+    });
+  }
 }
 
 extension PantryItemQuerySortThenBy
@@ -1062,6 +1516,43 @@ extension PantryItemQuerySortThenBy
   QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByIdDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'id', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByImagePath() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'imagePath', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByImagePathDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'imagePath', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByIsDiluted() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDiluted', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByIsDilutedDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isDiluted', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByIsEmptyStomach() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isEmptyStomach', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy>
+      thenByIsEmptyStomachDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isEmptyStomach', Sort.desc);
     });
   }
 
@@ -1124,6 +1615,18 @@ extension PantryItemQuerySortThenBy
       return query.addSortBy(r'symptoms', Sort.desc);
     });
   }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByUserId() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByUserIdDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'userId', Sort.desc);
+    });
+  }
 }
 
 extension PantryItemQueryWhereDistinct
@@ -1137,6 +1640,25 @@ extension PantryItemQueryWhereDistinct
   QueryBuilder<PantryItem, PantryItem, QDistinct> distinctByDateScanned() {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'dateScanned');
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QDistinct> distinctByImagePath(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'imagePath', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QDistinct> distinctByIsDiluted() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'isDiluted');
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QDistinct> distinctByIsEmptyStomach() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'isEmptyStomach');
     });
   }
 
@@ -1173,6 +1695,13 @@ extension PantryItemQueryWhereDistinct
       return query.addDistinctBy(r'symptoms', caseSensitive: caseSensitive);
     });
   }
+
+  QueryBuilder<PantryItem, PantryItem, QDistinct> distinctByUserId(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'userId', caseSensitive: caseSensitive);
+    });
+  }
 }
 
 extension PantryItemQueryProperty
@@ -1192,6 +1721,24 @@ extension PantryItemQueryProperty
   QueryBuilder<PantryItem, DateTime, QQueryOperations> dateScannedProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'dateScanned');
+    });
+  }
+
+  QueryBuilder<PantryItem, String?, QQueryOperations> imagePathProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'imagePath');
+    });
+  }
+
+  QueryBuilder<PantryItem, bool, QQueryOperations> isDilutedProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'isDiluted');
+    });
+  }
+
+  QueryBuilder<PantryItem, bool, QQueryOperations> isEmptyStomachProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'isEmptyStomach');
     });
   }
 
@@ -1222,6 +1769,12 @@ extension PantryItemQueryProperty
   QueryBuilder<PantryItem, String, QQueryOperations> symptomsProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'symptoms');
+    });
+  }
+
+  QueryBuilder<PantryItem, String, QQueryOperations> userIdProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'userId');
     });
   }
 }

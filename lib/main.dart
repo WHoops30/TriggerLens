@@ -1,20 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // ADDED: For persistent login check
+import 'package:firebase_auth/firebase_auth.dart';
 import 'firebase_options.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'services/database_service.dart';
+import 'services/notification_service.dart';
 import 'screens/scanner_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/onboarding/welcome_screen.dart';
-import 'screens/onboarding/path_screen.dart'; // ADDED: To route logged-in users
+import 'screens/onboarding/path_screen.dart';
 import 'utils/ui_helpers.dart';
 import 'screens/digital_pantry_screen.dart';
 import 'screens/insights_screen.dart';
 import 'screens/coach_screen.dart';
+import 'screens/onboarding_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    await NotificationService().init();
+    debugPrint("🔔 Notification Service Initialized Successfully!");
+  } catch (e) {
+    debugPrint("⚠️ Notification init failed: $e");
+  }
 
   try {
     await Firebase.initializeApp(
@@ -29,12 +38,33 @@ void main() async {
   await dbService.initDB();
   await dbService.seedDefaultData();
 
-  runApp(MyApp(dbService: dbService));
+  final existingProfile = await dbService.getUserProfile();
+  final currentUser = FirebaseAuth.instance.currentUser;
+
+  Widget initialScreen;
+  if (existingProfile == null) {
+    initialScreen = OnboardingScreen(dbService: dbService);
+  } else if (currentUser == null) {
+    initialScreen = WelcomeScreen(dbService: dbService);
+  } else {
+    initialScreen = MainLayoutScreen(dbService: dbService);
+  }
+
+  runApp(MyApp(
+    dbService: dbService,
+    initialScreen: initialScreen,
+  ));
 }
 
 class MyApp extends StatelessWidget {
   final DatabaseService dbService;
-  const MyApp({super.key, required this.dbService});
+  final Widget initialScreen;
+
+  const MyApp({
+    super.key,
+    required this.dbService,
+    required this.initialScreen,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -57,10 +87,7 @@ class MyApp extends StatelessWidget {
           ),
         ),
       ),
-      // THE SMART DOOR: Checks if a Firebase session exists before showing the Welcome Screen
-      home: FirebaseAuth.instance.currentUser == null
-          ? WelcomeScreen(dbService: dbService)
-          : PathScreen(dbService: dbService),
+      home: initialScreen,
     );
   }
 }
@@ -69,8 +96,11 @@ class MainLayoutScreen extends StatefulWidget {
   final DatabaseService dbService;
   final int initialIndex;
 
-  const MainLayoutScreen(
-      {super.key, required this.dbService, this.initialIndex = 0});
+  const MainLayoutScreen({
+    super.key,
+    required this.dbService,
+    this.initialIndex = 0,
+  });
 
   @override
   State<MainLayoutScreen> createState() => _MainLayoutScreenState();
@@ -87,6 +117,9 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // NEW: Detects if the software keyboard is currently visible on the screen
+    final bool isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
+
     final List<Widget> screens = [
       DashboardScreen(dbService: widget.dbService),
       DigitalPantryScreen(dbService: widget.dbService),
@@ -97,63 +130,75 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
     return Scaffold(
       extendBody: true,
       body: screens[_currentIndex],
-      floatingActionButton: Container(
-        width: 75,
-        height: 75,
-        margin: const EdgeInsets.only(top: 35),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(25),
-          boxShadow: [
-            BoxShadow(
-                color: AppColors.primary.withOpacity(0.2),
-                blurRadius: 15,
-                offset: const Offset(0, 8))
-          ],
-        ),
-        child: FloatingActionButton(
-          elevation: 0,
-          backgroundColor: Colors.transparent,
-          onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (context) =>
-                      ScannerScreen(dbService: widget.dbService))),
-          child: Image.asset('assets/images/barcode-scanner.png', width: 40),
-        ),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      bottomNavigationBar: Container(
-        margin: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
-        decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(35),
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 20,
-                  offset: const Offset(0, 5))
-            ]),
-        child: BottomAppBar(
-          color: Colors.transparent,
-          elevation: 0,
-          shape: const CircularNotchedRectangle(),
-          notchMargin: 12.0,
-          child: SizedBox(
-            height: 65,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildNavItem('assets/images/home.png', 0),
-                _buildNavItem('assets/images/write.png', 1),
-                const SizedBox(width: 45), // Space for FAB
-                _buildNavItem('assets/images/bar-graph.png', 2),
-                _buildNavItem('assets/images/message.png', 3),
-              ],
+      // Hide the floating action button when the keyboard is open
+      floatingActionButton: isKeyboardOpen
+          ? null
+          : Container(
+              width: 75,
+              height: 75,
+              margin: const EdgeInsets.only(top: 35),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(25),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withOpacity(0.2),
+                    blurRadius: 15,
+                    offset: const Offset(0, 8),
+                  )
+                ],
+              ),
+              child: FloatingActionButton(
+                elevation: 0,
+                backgroundColor: Colors.transparent,
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        ScannerScreen(dbService: widget.dbService),
+                  ),
+                ),
+                child:
+                    Image.asset('assets/images/barcode-scanner.png', width: 40),
+              ),
             ),
-          ),
-        ),
-      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      // Hide the bottom navigation bar when the keyboard is open
+      bottomNavigationBar: isKeyboardOpen
+          ? null
+          : Container(
+              margin: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(35),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 20,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: BottomAppBar(
+                color: Colors.transparent,
+                elevation: 0,
+                shape: const CircularNotchedRectangle(),
+                notchMargin: 12.0,
+                child: SizedBox(
+                  height: 65,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildNavItem('assets/images/home.png', 0),
+                      _buildNavItem('assets/images/write.png', 1),
+                      const SizedBox(width: 45),
+                      _buildNavItem('assets/images/bar-graph.png', 2),
+                      _buildNavItem('assets/images/message.png', 3),
+                    ],
+                  ),
+                ),
+              ),
+            ),
     );
   }
 
@@ -164,8 +209,9 @@ class _MainLayoutScreenState extends State<MainLayoutScreen> {
       icon: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-            color: isSelected ? AppColors.primaryDark : Colors.transparent,
-            borderRadius: BorderRadius.circular(15)),
+          color: isSelected ? AppColors.primaryDark : Colors.transparent,
+          borderRadius: BorderRadius.circular(15),
+        ),
         child: Image.asset(
           imagePath,
           width: 24,
