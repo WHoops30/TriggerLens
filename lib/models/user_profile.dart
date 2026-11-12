@@ -6,23 +6,32 @@ part 'user_profile.g.dart';
 class UserProfile {
   Id id = Isar.autoIncrement;
 
-  // NEW: Multi-User Identity Firewall
+  // Multi-User Identity Firewall
   @Index()
   late String userId;
 
-  // NEW: Privacy Policy Toggle
+  // Privacy Policy Toggle
   bool cloudSyncEnabled = false;
 
+  // NEW: Root Routing Flag (Anti-Loop Protection)
+  // This explicitly tracks if the medical engine has been calibrated, separate from Firebase Auth.
+  bool isSetupComplete = false;
+
   String phase = "Interactive Calibration";
+
+  // Clinical Demographics
+  String clinicalStatus =
+      "Preventative"; // Diagnosed GERD, Occasional Reflux, Preventative
+  String ageGroup = "26-45"; // <18, 18-25, 26-45, 46+
+  String refluxFrequency =
+      "Rarely"; // Almost every day, A few times a week, Rarely
+  String primaryGoal = "Track my limit";
+
   double multiplier = 1.0;
   int dailyCap = 15;
-
-  int goalIndex = 0;
-  int refluxFrequencyIndex = 0;
-  int baselineStrictnessIndex = 0;
   double targetDailyPral = 15.0;
 
-  // NEW BIOLOGICAL MULTIPLIERS
+  // BIOLOGICAL MULTIPLIERS
   double baseDailyCap = 15.0;
   double dynamicDailyCap = 15.0;
 }

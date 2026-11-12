@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../services/database_service.dart';
 import '../models/daily_log.dart';
 import '../utils/ui_helpers.dart';
+import '../utils/app_localizations.dart'; // NEW: Localization Engine
 
 class JournalScreen extends StatefulWidget {
   final DatabaseService dbService;
@@ -14,26 +15,27 @@ class JournalScreen extends StatefulWidget {
 
 class _JournalScreenState extends State<JournalScreen> {
   // Uses a Set to ensure we don't get duplicate symptoms if they tap wildly
+  // NOTE: This intentionally stores the ENGLISH string for database consistency
   final Set<String> _selectedSymptoms = {};
   double _severity = 0;
   bool _isSaving = false;
 
-  // The structured grid data
+  // The structured grid data mapped to localization keys
   final Map<String, List<Map<String, String>>> _symptomCategories = {
-    'Digestion': [
-      {'label': 'Bloating', 'icon': '🎈'},
-      {'label': 'Nausea', 'icon': '🤢'},
-      {'label': 'Burping', 'icon': '🫧'},
+    'category_digestion': [
+      {'label': 'Bloating', 'icon': '🎈', 'key': 'symp_bloating'},
+      {'label': 'Nausea', 'icon': '🤢', 'key': 'symp_nausea'},
+      {'label': 'Burping', 'icon': '🫧', 'key': 'symp_burping'},
     ],
-    'Pain & Discomfort': [
-      {'label': 'Heartburn', 'icon': '🔥'},
-      {'label': 'Cramps', 'icon': '⚡'},
-      {'label': 'Chest Pain', 'icon': '🫀'},
+    'category_pain_discomfort': [
+      {'label': 'Heartburn', 'icon': '🔥', 'key': 'symp_heartburn'},
+      {'label': 'Cramps', 'icon': '⚡', 'key': 'symp_cramps'},
+      {'label': 'Chest Pain', 'icon': '🫀', 'key': 'symp_chest_pain'},
     ],
-    'Throat & Mouth': [
-      {'label': 'Acidic Taste', 'icon': '🍋'},
-      {'label': 'Sore Throat', 'icon': '🧣'},
-      {'label': 'Dry Cough', 'icon': '😮‍💨'},
+    'category_throat_mouth': [
+      {'label': 'Acidic Taste', 'icon': '🍋', 'key': 'symp_acidic_taste'},
+      {'label': 'Sore Throat', 'icon': '🧣', 'key': 'symp_sore_throat'},
+      {'label': 'Dry Cough', 'icon': '😮‍💨', 'key': 'symp_dry_cough'},
     ],
   };
 
@@ -47,7 +49,7 @@ class _JournalScreenState extends State<JournalScreen> {
     });
   }
 
-  Future<void> _saveDailyLog() async {
+  Future<void> _saveDailyLog(AppColors colors, AppLocalizations loc) async {
     setState(() => _isSaving = true);
 
     // Normalize the date to midnight so it acts as a unique ID for the entire day
@@ -65,8 +67,8 @@ class _JournalScreenState extends State<JournalScreen> {
       setState(() => _isSaving = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Daily symptoms logged successfully! ✨'),
-          backgroundColor: AppColors.primary,
+          content: Text(loc.loc('daily_symptoms_logged')),
+          backgroundColor: colors.primary,
           behavior: SnackBarBehavior.floating,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
@@ -83,16 +85,21 @@ class _JournalScreenState extends State<JournalScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final loc = AppLocalizations.of(context);
+
+    // DateFormat automatically handles the locale string output if set,
+    // but here we keep it standard for simplicity.
     final String todayDate = DateFormat('EEEE, MMMM d').format(DateTime.now());
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: colors.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Daily Check-in',
+        title: Text(loc.loc('daily_checkin'),
             style: TextStyle(
-                color: AppColors.primaryDark,
+                color: colors.primaryDark,
                 fontWeight: FontWeight.w900,
                 fontSize: 24)),
         centerTitle: true,
@@ -107,14 +114,14 @@ class _JournalScreenState extends State<JournalScreen> {
                 children: [
                   const SizedBox(height: 10),
                   Text(todayDate,
-                      style: const TextStyle(
-                          color: AppColors.textGrey,
+                      style: TextStyle(
+                          color: colors.textGrey,
                           fontSize: 14,
                           fontWeight: FontWeight.bold)),
                   const SizedBox(height: 5),
-                  const Text('How is your tummy feeling today?',
+                  Text(loc.loc('how_tummy_feeling'),
                       style: TextStyle(
-                          color: AppColors.primaryDark,
+                          color: colors.primaryDark,
                           fontSize: 28,
                           fontWeight: FontWeight.w900,
                           height: 1.2)),
@@ -127,11 +134,11 @@ class _JournalScreenState extends State<JournalScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(category.key,
-                              style: const TextStyle(
+                          Text(loc.loc(category.key),
+                              style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w900,
-                                  color: AppColors.textDark)),
+                                  color: colors.textDark)),
                           const SizedBox(height: 15),
                           Wrap(
                             spacing: 12,
@@ -150,19 +157,19 @@ class _JournalScreenState extends State<JournalScreen> {
                                       const EdgeInsets.symmetric(vertical: 15),
                                   decoration: BoxDecoration(
                                     color: isSelected
-                                        ? AppColors.primary
+                                        ? colors.primary
                                         : Colors.white,
                                     borderRadius: BorderRadius.circular(20),
                                     border: Border.all(
                                       color: isSelected
-                                          ? AppColors.primary
+                                          ? colors.primary
                                           : Colors.grey.shade200,
                                       width: 2,
                                     ),
                                     boxShadow: isSelected
                                         ? [
                                             BoxShadow(
-                                                color: AppColors.primary
+                                                color: colors.primary
                                                     .withOpacity(0.3),
                                                 blurRadius: 10,
                                                 offset: const Offset(0, 5))
@@ -180,14 +187,15 @@ class _JournalScreenState extends State<JournalScreen> {
                                           style: const TextStyle(fontSize: 28)),
                                       const SizedBox(height: 8),
                                       Text(
-                                        symptom['label']!,
+                                        loc.loc(symptom[
+                                            'key']!), // Translate the UI display
                                         textAlign: TextAlign.center,
                                         style: TextStyle(
                                             fontSize: 11,
                                             fontWeight: FontWeight.w800,
                                             color: isSelected
                                                 ? Colors.white
-                                                : AppColors.textGrey),
+                                                : colors.textGrey),
                                       )
                                     ],
                                   ),
@@ -220,32 +228,31 @@ class _JournalScreenState extends State<JournalScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Overall Discomfort',
+                            Text(loc.loc('overall_discomfort'),
                                 style: TextStyle(
                                     fontWeight: FontWeight.w900,
                                     fontSize: 16,
-                                    color: AppColors.textDark)),
+                                    color: colors.textDark)),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 4),
                               decoration: BoxDecoration(
-                                  color:
-                                      AppColors.primaryLight.withOpacity(0.2),
+                                  color: colors.primaryLight.withOpacity(0.2),
                                   borderRadius: BorderRadius.circular(15)),
                               child: Text('$_severity / 10',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                       fontWeight: FontWeight.w900,
                                       fontSize: 14,
-                                      color: AppColors.primaryDark)),
+                                      color: colors.primaryDark)),
                             ),
                           ],
                         ),
                         const SizedBox(height: 15),
                         SliderTheme(
                           data: SliderTheme.of(context).copyWith(
-                            activeTrackColor: AppColors.primary,
+                            activeTrackColor: colors.primary,
                             inactiveTrackColor: Colors.grey.shade200,
-                            thumbColor: AppColors.primaryDark,
+                            thumbColor: colors.primaryDark,
                             trackHeight: 8.0,
                             thumbShape: const RoundSliderThumbShape(
                                 enabledThumbRadius: 12.0),
@@ -260,19 +267,19 @@ class _JournalScreenState extends State<JournalScreen> {
                             onChanged: (val) => setState(() => _severity = val),
                           ),
                         ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 10),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('None',
+                              Text(loc.loc('none'),
                                   style: TextStyle(
-                                      color: AppColors.textGrey,
+                                      color: colors.textGrey,
                                       fontSize: 10,
                                       fontWeight: FontWeight.bold)),
-                              Text('Severe',
+                              Text(loc.loc('severe'),
                                   style: TextStyle(
-                                      color: AppColors.textGrey,
+                                      color: colors.textGrey,
                                       fontSize: 10,
                                       fontWeight: FontWeight.bold)),
                             ],
@@ -295,16 +302,16 @@ class _JournalScreenState extends State<JournalScreen> {
               height: 60,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: colors.primary,
                     elevation: 10,
-                    shadowColor: AppColors.primary.withOpacity(0.5),
+                    shadowColor: colors.primary.withOpacity(0.5),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20))),
-                onPressed: _isSaving ? null : _saveDailyLog,
+                onPressed: _isSaving ? null : () => _saveDailyLog(colors, loc),
                 child: _isSaving
                     ? const CircularProgressIndicator(color: Colors.white)
-                    : const Text('Save Check-in',
-                        style: TextStyle(
+                    : Text(loc.loc('save_checkin'),
+                        style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w900,
                             fontSize: 18)),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/ui_helpers.dart'; // NEW: Access to dynamic themes
 
 class ReassuranceCard extends StatelessWidget {
   final String title;
@@ -18,6 +19,9 @@ class ReassuranceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Inject dynamic theme colors
+    final colors = AppColors.of(context);
+
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -26,16 +30,18 @@ class ReassuranceCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFFFF0F3) : Colors.grey[50],
+          color: isSelected
+              ? colors.primaryLight.withOpacity(0.1)
+              : Colors.grey[50],
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? const Color(0xFFFF4B72) : Colors.transparent,
+            color: isSelected ? colors.primary : Colors.transparent,
             width: 2,
           ),
           boxShadow: [
             if (isSelected)
               BoxShadow(
-                color: const Color(0xFFFF4B72).withOpacity(0.1),
+                color: colors.primary.withOpacity(0.1),
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               ),
@@ -48,7 +54,7 @@ class ReassuranceCard extends StatelessWidget {
               children: [
                 Icon(
                   icon,
-                  color: isSelected ? const Color(0xFFFF4B72) : Colors.black87,
+                  color: isSelected ? colors.primary : Colors.black87,
                   size: 28,
                 ),
                 const SizedBox(width: 16),
@@ -59,16 +65,13 @@ class ReassuranceCard extends StatelessWidget {
                       fontSize: 18,
                       fontWeight:
                           isSelected ? FontWeight.bold : FontWeight.w600,
-                      color:
-                          isSelected ? const Color(0xFFFF4B72) : Colors.black87,
+                      color: isSelected ? colors.primary : Colors.black87,
                     ),
                   ),
                 ),
-                // Replaced the arrow with a checkmark circle
                 Icon(
                   isSelected ? Icons.check_circle : Icons.circle_outlined,
-                  color:
-                      isSelected ? const Color(0xFFFF4B72) : Colors.grey[400],
+                  color: isSelected ? colors.primary : Colors.grey[400],
                 ),
               ],
             ),

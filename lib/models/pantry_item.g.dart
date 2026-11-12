@@ -27,48 +27,68 @@ const PantryItemSchema = CollectionSchema(
       name: r'dateScanned',
       type: IsarType.dateTime,
     ),
-    r'imagePath': PropertySchema(
+    r'drinkCategory': PropertySchema(
       id: 2,
+      name: r'drinkCategory',
+      type: IsarType.string,
+    ),
+    r'imagePath': PropertySchema(
+      id: 3,
       name: r'imagePath',
       type: IsarType.string,
     ),
+    r'isConsumed': PropertySchema(
+      id: 4,
+      name: r'isConsumed',
+      type: IsarType.bool,
+    ),
     r'isDiluted': PropertySchema(
-      id: 3,
+      id: 5,
       name: r'isDiluted',
       type: IsarType.bool,
     ),
     r'isEmptyStomach': PropertySchema(
-      id: 4,
+      id: 6,
       name: r'isEmptyStomach',
       type: IsarType.bool,
     ),
     r'isFavorite': PropertySchema(
-      id: 5,
+      id: 7,
       name: r'isFavorite',
       type: IsarType.bool,
     ),
     r'name': PropertySchema(
-      id: 6,
+      id: 8,
       name: r'name',
       type: IsarType.string,
     ),
+    r'portionCount': PropertySchema(
+      id: 9,
+      name: r'portionCount',
+      type: IsarType.double,
+    ),
+    r'portionMeasurement': PropertySchema(
+      id: 10,
+      name: r'portionMeasurement',
+      type: IsarType.string,
+    ),
     r'rawText': PropertySchema(
-      id: 7,
+      id: 11,
       name: r'rawText',
       type: IsarType.string,
     ),
     r'riskLevel': PropertySchema(
-      id: 8,
+      id: 12,
       name: r'riskLevel',
       type: IsarType.string,
     ),
     r'symptoms': PropertySchema(
-      id: 9,
+      id: 13,
       name: r'symptoms',
       type: IsarType.string,
     ),
     r'userId': PropertySchema(
-      id: 10,
+      id: 14,
       name: r'userId',
       type: IsarType.string,
     )
@@ -107,6 +127,7 @@ int _pantryItemEstimateSize(
   Map<Type, List<int>> allOffsets,
 ) {
   var bytesCount = offsets.last;
+  bytesCount += 3 + object.drinkCategory.length * 3;
   {
     final value = object.imagePath;
     if (value != null) {
@@ -114,6 +135,7 @@ int _pantryItemEstimateSize(
     }
   }
   bytesCount += 3 + object.name.length * 3;
+  bytesCount += 3 + object.portionMeasurement.length * 3;
   bytesCount += 3 + object.rawText.length * 3;
   bytesCount += 3 + object.riskLevel.length * 3;
   bytesCount += 3 + object.symptoms.length * 3;
@@ -129,15 +151,19 @@ void _pantryItemSerialize(
 ) {
   writer.writeLong(offsets[0], object.acidScore);
   writer.writeDateTime(offsets[1], object.dateScanned);
-  writer.writeString(offsets[2], object.imagePath);
-  writer.writeBool(offsets[3], object.isDiluted);
-  writer.writeBool(offsets[4], object.isEmptyStomach);
-  writer.writeBool(offsets[5], object.isFavorite);
-  writer.writeString(offsets[6], object.name);
-  writer.writeString(offsets[7], object.rawText);
-  writer.writeString(offsets[8], object.riskLevel);
-  writer.writeString(offsets[9], object.symptoms);
-  writer.writeString(offsets[10], object.userId);
+  writer.writeString(offsets[2], object.drinkCategory);
+  writer.writeString(offsets[3], object.imagePath);
+  writer.writeBool(offsets[4], object.isConsumed);
+  writer.writeBool(offsets[5], object.isDiluted);
+  writer.writeBool(offsets[6], object.isEmptyStomach);
+  writer.writeBool(offsets[7], object.isFavorite);
+  writer.writeString(offsets[8], object.name);
+  writer.writeDouble(offsets[9], object.portionCount);
+  writer.writeString(offsets[10], object.portionMeasurement);
+  writer.writeString(offsets[11], object.rawText);
+  writer.writeString(offsets[12], object.riskLevel);
+  writer.writeString(offsets[13], object.symptoms);
+  writer.writeString(offsets[14], object.userId);
 }
 
 PantryItem _pantryItemDeserialize(
@@ -149,16 +175,20 @@ PantryItem _pantryItemDeserialize(
   final object = PantryItem();
   object.acidScore = reader.readLong(offsets[0]);
   object.dateScanned = reader.readDateTime(offsets[1]);
+  object.drinkCategory = reader.readString(offsets[2]);
   object.id = id;
-  object.imagePath = reader.readStringOrNull(offsets[2]);
-  object.isDiluted = reader.readBool(offsets[3]);
-  object.isEmptyStomach = reader.readBool(offsets[4]);
-  object.isFavorite = reader.readBool(offsets[5]);
-  object.name = reader.readString(offsets[6]);
-  object.rawText = reader.readString(offsets[7]);
-  object.riskLevel = reader.readString(offsets[8]);
-  object.symptoms = reader.readString(offsets[9]);
-  object.userId = reader.readString(offsets[10]);
+  object.imagePath = reader.readStringOrNull(offsets[3]);
+  object.isConsumed = reader.readBool(offsets[4]);
+  object.isDiluted = reader.readBool(offsets[5]);
+  object.isEmptyStomach = reader.readBool(offsets[6]);
+  object.isFavorite = reader.readBool(offsets[7]);
+  object.name = reader.readString(offsets[8]);
+  object.portionCount = reader.readDouble(offsets[9]);
+  object.portionMeasurement = reader.readString(offsets[10]);
+  object.rawText = reader.readString(offsets[11]);
+  object.riskLevel = reader.readString(offsets[12]);
+  object.symptoms = reader.readString(offsets[13]);
+  object.userId = reader.readString(offsets[14]);
   return object;
 }
 
@@ -174,22 +204,30 @@ P _pantryItemDeserializeProp<P>(
     case 1:
       return (reader.readDateTime(offset)) as P;
     case 2:
-      return (reader.readStringOrNull(offset)) as P;
+      return (reader.readString(offset)) as P;
     case 3:
-      return (reader.readBool(offset)) as P;
+      return (reader.readStringOrNull(offset)) as P;
     case 4:
       return (reader.readBool(offset)) as P;
     case 5:
       return (reader.readBool(offset)) as P;
     case 6:
-      return (reader.readString(offset)) as P;
+      return (reader.readBool(offset)) as P;
     case 7:
-      return (reader.readString(offset)) as P;
+      return (reader.readBool(offset)) as P;
     case 8:
       return (reader.readString(offset)) as P;
     case 9:
-      return (reader.readString(offset)) as P;
+      return (reader.readDouble(offset)) as P;
     case 10:
+      return (reader.readString(offset)) as P;
+    case 11:
+      return (reader.readString(offset)) as P;
+    case 12:
+      return (reader.readString(offset)) as P;
+    case 13:
+      return (reader.readString(offset)) as P;
+    case 14:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -442,6 +480,142 @@ extension PantryItemQueryFilter
     });
   }
 
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      drinkCategoryEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'drinkCategory',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      drinkCategoryGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'drinkCategory',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      drinkCategoryLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'drinkCategory',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      drinkCategoryBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'drinkCategory',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      drinkCategoryStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'drinkCategory',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      drinkCategoryEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'drinkCategory',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      drinkCategoryContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'drinkCategory',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      drinkCategoryMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'drinkCategory',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      drinkCategoryIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'drinkCategory',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      drinkCategoryIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'drinkCategory',
+        value: '',
+      ));
+    });
+  }
+
   QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> idEqualTo(
       Id value) {
     return QueryBuilder.apply(this, (query) {
@@ -647,6 +821,16 @@ extension PantryItemQueryFilter
     });
   }
 
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> isConsumedEqualTo(
+      bool value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'isConsumed',
+        value: value,
+      ));
+    });
+  }
+
   QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition> isDilutedEqualTo(
       bool value) {
     return QueryBuilder.apply(this, (query) {
@@ -802,6 +986,208 @@ extension PantryItemQueryFilter
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.greaterThan(
         property: r'name',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionCountEqualTo(
+    double value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'portionCount',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionCountGreaterThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'portionCount',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionCountLessThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'portionCount',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionCountBetween(
+    double lower,
+    double upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'portionCount',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionMeasurementEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'portionMeasurement',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionMeasurementGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'portionMeasurement',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionMeasurementLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'portionMeasurement',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionMeasurementBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'portionMeasurement',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionMeasurementStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'portionMeasurement',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionMeasurementEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'portionMeasurement',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionMeasurementContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'portionMeasurement',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionMeasurementMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'portionMeasurement',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionMeasurementIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'portionMeasurement',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterFilterCondition>
+      portionMeasurementIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'portionMeasurement',
         value: '',
       ));
     });
@@ -1371,6 +1757,18 @@ extension PantryItemQuerySortBy
     });
   }
 
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByDrinkCategory() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'drinkCategory', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByDrinkCategoryDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'drinkCategory', Sort.desc);
+    });
+  }
+
   QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByImagePath() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'imagePath', Sort.asc);
@@ -1380,6 +1778,18 @@ extension PantryItemQuerySortBy
   QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByImagePathDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'imagePath', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByIsConsumed() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isConsumed', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByIsConsumedDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isConsumed', Sort.desc);
     });
   }
 
@@ -1429,6 +1839,32 @@ extension PantryItemQuerySortBy
   QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByNameDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'name', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByPortionCount() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'portionCount', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> sortByPortionCountDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'portionCount', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy>
+      sortByPortionMeasurement() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'portionMeasurement', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy>
+      sortByPortionMeasurementDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'portionMeasurement', Sort.desc);
     });
   }
 
@@ -1507,6 +1943,18 @@ extension PantryItemQuerySortThenBy
     });
   }
 
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByDrinkCategory() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'drinkCategory', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByDrinkCategoryDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'drinkCategory', Sort.desc);
+    });
+  }
+
   QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenById() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'id', Sort.asc);
@@ -1528,6 +1976,18 @@ extension PantryItemQuerySortThenBy
   QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByImagePathDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'imagePath', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByIsConsumed() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isConsumed', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByIsConsumedDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'isConsumed', Sort.desc);
     });
   }
 
@@ -1577,6 +2037,32 @@ extension PantryItemQuerySortThenBy
   QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByNameDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'name', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByPortionCount() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'portionCount', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy> thenByPortionCountDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'portionCount', Sort.desc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy>
+      thenByPortionMeasurement() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'portionMeasurement', Sort.asc);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QAfterSortBy>
+      thenByPortionMeasurementDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'portionMeasurement', Sort.desc);
     });
   }
 
@@ -1643,10 +2129,24 @@ extension PantryItemQueryWhereDistinct
     });
   }
 
+  QueryBuilder<PantryItem, PantryItem, QDistinct> distinctByDrinkCategory(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'drinkCategory',
+          caseSensitive: caseSensitive);
+    });
+  }
+
   QueryBuilder<PantryItem, PantryItem, QDistinct> distinctByImagePath(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'imagePath', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QDistinct> distinctByIsConsumed() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'isConsumed');
     });
   }
 
@@ -1672,6 +2172,20 @@ extension PantryItemQueryWhereDistinct
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'name', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QDistinct> distinctByPortionCount() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'portionCount');
+    });
+  }
+
+  QueryBuilder<PantryItem, PantryItem, QDistinct> distinctByPortionMeasurement(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'portionMeasurement',
+          caseSensitive: caseSensitive);
     });
   }
 
@@ -1724,9 +2238,21 @@ extension PantryItemQueryProperty
     });
   }
 
+  QueryBuilder<PantryItem, String, QQueryOperations> drinkCategoryProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'drinkCategory');
+    });
+  }
+
   QueryBuilder<PantryItem, String?, QQueryOperations> imagePathProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'imagePath');
+    });
+  }
+
+  QueryBuilder<PantryItem, bool, QQueryOperations> isConsumedProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'isConsumed');
     });
   }
 
@@ -1751,6 +2277,19 @@ extension PantryItemQueryProperty
   QueryBuilder<PantryItem, String, QQueryOperations> nameProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'name');
+    });
+  }
+
+  QueryBuilder<PantryItem, double, QQueryOperations> portionCountProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'portionCount');
+    });
+  }
+
+  QueryBuilder<PantryItem, String, QQueryOperations>
+      portionMeasurementProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'portionMeasurement');
     });
   }
 

@@ -6,23 +6,44 @@ part 'pantry_item.g.dart';
 class PantryItem {
   Id id = Isar.autoIncrement;
 
-  // NEW: Multi-User Identity Firewall
+  // Multi-User Identity Firewall (Restored)
   @Index()
   late String userId;
 
   late String name;
   late DateTime dateScanned;
+
+  // Stored as "None" or the specific symptom (e.g., "Burning pain")
   late String symptoms;
+
+  // "GREEN", "YELLOW", "RED"
   late String riskLevel;
-  late bool isFavorite;
+
+  bool isFavorite = false;
+
+  // The raw OCR string or manual entry
   late String rawText;
+
+  // The base calculated load *before* portion scaling
   late int acidScore;
 
   String? imagePath;
 
+  // Contextual biological flags
+  bool isEmptyStomach = false;
+  bool isDiluted = false;
+  bool isConsumed = false;
+
   // ==========================================
-  // NEW: Consumption Context Multipliers
+  // DYNAMIC DOSAGE & CATEGORIZATION METRICS
   // ==========================================
-  bool isEmptyStomach = false; // If true -> 1.2x Risk Multiplier
-  bool isDiluted = false; // If true -> 0.85x Risk Multiplier
+
+  // Automatically detected via KeywordMappingAlgorithm (e.g., "Heavy Powder", "Herbal Tea")
+  String drinkCategory = "General Beverage";
+
+  // The unit of measurement the user selected (e.g., "Sachet", "Tablespoon", "Tea Bag")
+  String portionMeasurement = "Sachet";
+
+  // The exact amount consumed.
+  double portionCount = 1.0;
 }

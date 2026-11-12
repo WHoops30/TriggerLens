@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import 'dart:io'; // Required to check the platform
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -27,11 +28,12 @@ class NotificationService {
     const AndroidInitializationSettings androidSettings =
         AndroidInitializationSettings('@mipmap/ic_launcher');
 
+    // Passive request settings (for initial setup)
     const DarwinInitializationSettings iosSettings =
         DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
+      requestAlertPermission: false, // We will request this explicitly below
+      requestBadgePermission: false,
+      requestSoundPermission: false,
     );
 
     const InitializationSettings initSettings = InitializationSettings(
@@ -43,23 +45,43 @@ class NotificationService {
       settings: initSettings,
     );
 
-    // Explicitly request notification and exact alarm permissions for Android 13+
-    await _notificationsPlugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestNotificationsPermission();
+    // ==========================================
+    // PRO FEATURE: EXPLICIT OS-LEVEL PERMISSIONS
+    // ==========================================
+    if (Platform.isAndroid) {
+      final androidImplementation =
+          _notificationsPlugin.resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>();
 
-    await _notificationsPlugin
-        .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.requestExactAlarmsPermission();
+      if (androidImplementation != null) {
+        // Request base notification permission (Crucial for Android 13+)
+        await androidImplementation.requestNotificationsPermission();
+        // Request exact alarms permission (Crucial for 6-hour digestion timers)
+        await androidImplementation.requestExactAlarmsPermission();
+      }
+    } else if (Platform.isIOS) {
+      final iosImplementation =
+          _notificationsPlugin.resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin>();
+
+      if (iosImplementation != null) {
+        // Explicitly prompt the user on iOS
+        await iosImplementation.requestPermissions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+      }
+    }
 
     _isInitialized = true;
+    debugPrint("🔔 Notification Service Fully Initialized & Authorized");
   }
 
   bool _isQuietHours() {
     final now = DateTime.now();
     final hour = now.hour;
+    // Suppress non-critical notifications between 10 PM and 7 AM
     return hour >= 22 || hour < 7;
   }
 

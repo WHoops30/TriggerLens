@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/database_service.dart';
 import '../../utils/ui_helpers.dart';
+import '../../utils/app_localizations.dart'; // NEW: Localization Engine
 
 // ----------------------------------------------------------------------
 // 1. FORGOT PASSWORD (EMAIL ENTRY)
@@ -19,7 +20,6 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   void _sendResetEmail() {
     if (_formKey.currentState!.validate()) {
-      // TODO: Firebase - await FirebaseAuth.instance.sendPasswordResetEmail(email: _emailController.text);
       Navigator.push(
           context,
           MaterialPageRoute(
@@ -29,52 +29,50 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final loc = AppLocalizations.of(context);
+
     return Scaffold(
-      body: Container(
-        height: double.infinity,
-        decoration: const BoxDecoration(gradient: AppColors.backgroundGradient),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(30.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  IconButton(
-                      icon: Image.asset('assets/images/back_1.png', width: 24),
-                      padding: EdgeInsets.zero,
-                      alignment: Alignment.centerLeft,
-                      onPressed: () => Navigator.pop(context)),
-                  const SizedBox(height: 20),
-                  const Text('Forgot Password',
-                      style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.textDark)),
-                  const SizedBox(height: 10),
-                  const Text(
-                      'Please enter your Email Address to reset the password',
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textGrey,
-                          height: 1.5)),
-                  const SizedBox(height: 30),
-                  CustomTextField(
-                    hint: 'Email Address',
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    validator: (val) => val == null || !val.contains('@')
-                        ? 'Enter a valid email'
-                        : null,
-                  ),
-                  const SizedBox(height: 10),
-                  GradientButton(
-                    text: 'Reset Password',
-                    onPressed: _sendResetEmail,
-                  ),
-                ],
-              ),
+      backgroundColor: colors.background,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(30.0),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                IconButton(
+                    icon: Image.asset('assets/images/back_1.png',
+                        width: 24, color: colors.textDark),
+                    padding: EdgeInsets.zero,
+                    alignment: Alignment.centerLeft,
+                    onPressed: () => Navigator.pop(context)),
+                const SizedBox(height: 20),
+                Text(loc.loc('forgot_password_title'),
+                    style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        color: colors.textDark)),
+                const SizedBox(height: 10),
+                Text(loc.loc('forgot_password_desc'),
+                    style: TextStyle(
+                        fontSize: 11, color: colors.textGrey, height: 1.5)),
+                const SizedBox(height: 30),
+                CustomTextField(
+                  hint: loc.loc('email_address'),
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (val) => val == null || !val.contains('@')
+                      ? loc.loc('invalid_email_format')
+                      : null,
+                ),
+                const SizedBox(height: 10),
+                GradientButton(
+                  text: loc.loc('reset_password_btn'),
+                  onPressed: _sendResetEmail,
+                ),
+              ],
             ),
           ),
         ),
@@ -84,7 +82,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 }
 
 // ----------------------------------------------------------------------
-// 2. OTP SCREEN (4 BOXES WITH AUTO-FOCUS)
+// 2. OTP SCREEN
 // ----------------------------------------------------------------------
 class OtpScreen extends StatefulWidget {
   final DatabaseService dbService;
@@ -100,7 +98,6 @@ class _OtpScreenState extends State<OtpScreen> {
       List.generate(4, (index) => TextEditingController());
 
   void _verifyOtp() {
-    // TODO: Verify Firebase OTP logic if using Phone Auth, else this is just mock UI for Email link flows.
     Navigator.push(
         context,
         MaterialPageRoute(
@@ -121,73 +118,74 @@ class _OtpScreenState extends State<OtpScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final loc = AppLocalizations.of(context);
+
     return Scaffold(
-      body: Container(
-        height: double.infinity,
-        decoration: const BoxDecoration(gradient: AppColors.backgroundGradient),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(30.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                IconButton(
-                    icon: Image.asset('assets/images/back_1.png', width: 24),
-                    padding: EdgeInsets.zero,
-                    alignment: Alignment.centerLeft,
-                    onPressed: () => Navigator.pop(context)),
-                const SizedBox(height: 20),
-                const Text('Enter OTP',
-                    style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.textDark)),
-                const SizedBox(height: 10),
-                const Text(
-                    'Please enter the OTP sent to your registered Email Address',
-                    style: TextStyle(
-                        fontSize: 11, color: AppColors.textGrey, height: 1.5)),
-                const SizedBox(height: 30),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: List.generate(4, (index) => _buildOtpBox(index)),
-                ),
-                const SizedBox(height: 30),
-                GradientButton(text: 'Verify Code', onPressed: _verifyOtp),
-                const SizedBox(height: 20),
-                Center(
-                  child: RichText(
-                      text: const TextSpan(
+      backgroundColor: colors.background,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(30.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              IconButton(
+                  icon: Image.asset('assets/images/back_1.png',
+                      width: 24, color: colors.textDark),
+                  padding: EdgeInsets.zero,
+                  alignment: Alignment.centerLeft,
+                  onPressed: () => Navigator.pop(context)),
+              const SizedBox(height: 20),
+              Text(loc.loc('enter_otp'),
+                  style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                      color: colors.textDark)),
+              const SizedBox(height: 10),
+              Text(loc.loc('enter_otp_desc'),
+                  style: TextStyle(
+                      fontSize: 11, color: colors.textGrey, height: 1.5)),
+              const SizedBox(height: 30),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children:
+                    List.generate(4, (index) => _buildOtpBox(index, colors)),
+              ),
+              const SizedBox(height: 30),
+              GradientButton(
+                  text: loc.loc('verify_code'), onPressed: _verifyOtp),
+              const SizedBox(height: 20),
+              Center(
+                child: RichText(
+                    text: TextSpan(
+                        style: TextStyle(fontSize: 10, color: colors.textGrey),
+                        children: [
+                      TextSpan(text: loc.loc('no_otp_yet')),
+                      TextSpan(
+                          text: loc.loc('resend_otp'),
                           style: TextStyle(
-                              fontSize: 10, color: AppColors.textGrey),
-                          children: [
-                        TextSpan(text: "Haven't got the OTP yet? "),
-                        TextSpan(
-                            text: "Resend OTP",
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textDark,
-                                decoration: TextDecoration.underline)),
-                      ])),
-                )
-              ],
-            ),
+                              fontWeight: FontWeight.bold,
+                              color: colors.textDark,
+                              decoration: TextDecoration.underline)),
+                    ])),
+              )
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildOtpBox(int index) {
+  Widget _buildOtpBox(int index, AppColors colors) {
     return Container(
       width: 60,
       height: 60,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: colors.background,
         borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: AppColors.primary.withOpacity(0.5)),
+        border: Border.all(color: colors.primary.withOpacity(0.5)),
         boxShadow: [
-          BoxShadow(color: AppColors.primary.withOpacity(0.1), blurRadius: 5)
+          BoxShadow(color: colors.primary.withOpacity(0.1), blurRadius: 5)
         ],
       ),
       child: Center(
@@ -197,10 +195,8 @@ class _OtpScreenState extends State<OtpScreen> {
           keyboardType: TextInputType.number,
           textAlign: TextAlign.center,
           maxLength: 1,
-          style: const TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w900,
-              color: AppColors.primary),
+          style: TextStyle(
+              fontSize: 24, fontWeight: FontWeight.w900, color: colors.primary),
           decoration:
               const InputDecoration(counterText: "", border: InputBorder.none),
           onChanged: (value) {
@@ -225,42 +221,42 @@ class PasswordResetConfirmScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final loc = AppLocalizations.of(context);
+
     return Scaffold(
-      body: Container(
-        height: double.infinity,
-        decoration: const BoxDecoration(gradient: AppColors.backgroundGradient),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(30.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                IconButton(
-                    icon: Image.asset('assets/images/back_1.png', width: 24),
-                    padding: EdgeInsets.zero,
-                    alignment: Alignment.centerLeft,
-                    onPressed: () => Navigator.pop(context)),
-                const SizedBox(height: 20),
-                const Text('Password Reset',
-                    style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.textDark)),
-                const SizedBox(height: 10),
-                const Text(
-                    'Your password has been successfully reset. Click confirm to set a new password.',
-                    style: TextStyle(
-                        fontSize: 11, color: AppColors.textGrey, height: 1.5)),
-                const SizedBox(height: 30),
-                GradientButton(
-                    text: 'Confirm',
-                    onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) =>
-                                SetNewPasswordScreen(dbService: dbService)))),
-              ],
-            ),
+      backgroundColor: colors.background,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(30.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              IconButton(
+                  icon: Image.asset('assets/images/back_1.png',
+                      width: 24, color: colors.textDark),
+                  padding: EdgeInsets.zero,
+                  alignment: Alignment.centerLeft,
+                  onPressed: () => Navigator.pop(context)),
+              const SizedBox(height: 20),
+              Text(loc.loc('password_reset_title'),
+                  style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                      color: colors.textDark)),
+              const SizedBox(height: 10),
+              Text(loc.loc('password_reset_success_desc'),
+                  style: TextStyle(
+                      fontSize: 11, color: colors.textGrey, height: 1.5)),
+              const SizedBox(height: 30),
+              GradientButton(
+                  text: loc.loc('confirm_btn'),
+                  onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) =>
+                              SetNewPasswordScreen(dbService: dbService)))),
+            ],
           ),
         ),
       ),
@@ -288,7 +284,6 @@ class _SetNewPasswordScreenState extends State<SetNewPasswordScreen> {
 
   void _updatePassword() {
     if (_formKey.currentState!.validate()) {
-      // TODO: Firebase - await user.updatePassword(_passwordController.text);
       Navigator.push(context,
           MaterialPageRoute(builder: (context) => const SuccessResetScreen()));
     }
@@ -296,74 +291,73 @@ class _SetNewPasswordScreenState extends State<SetNewPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final loc = AppLocalizations.of(context);
+
     return Scaffold(
-      body: Container(
-        height: double.infinity,
-        decoration: const BoxDecoration(gradient: AppColors.backgroundGradient),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(30.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  IconButton(
-                      icon: Image.asset('assets/images/back_1.png', width: 24),
-                      padding: EdgeInsets.zero,
-                      alignment: Alignment.centerLeft,
-                      onPressed: () => Navigator.pop(context)),
-                  const SizedBox(height: 20),
-                  const Text('Set a New Password',
-                      style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.textDark)),
-                  const SizedBox(height: 10),
-                  const Text(
-                      'Create a new password. Ensure it is differs from previous ones for security.',
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textGrey,
-                          height: 1.5)),
-                  const SizedBox(height: 30),
-                  const Text('Password',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textDark)),
-                  const SizedBox(height: 8),
-                  CustomTextField(
-                    hint: 'Enter your New Password',
-                    isPassword: true,
-                    hidePassword: hide1,
-                    controller: _passwordController,
-                    onEyeTap: () => setState(() => hide1 = !hide1),
-                    validator: (val) => val == null || val.length < 6
-                        ? 'Min 6 characters'
-                        : null,
-                  ),
-                  const SizedBox(height: 10),
-                  const Text('Confirm Password',
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textDark)),
-                  const SizedBox(height: 8),
-                  CustomTextField(
-                    hint: 'Re-enter Password',
-                    isPassword: true,
-                    hidePassword: hide2,
-                    controller: _confirmController,
-                    onEyeTap: () => setState(() => hide2 = !hide2),
-                    validator: (val) => val != _passwordController.text
-                        ? 'Passwords do not match'
-                        : null,
-                  ),
-                  const SizedBox(height: 20),
-                  GradientButton(text: 'Confirm', onPressed: _updatePassword),
-                ],
-              ),
+      backgroundColor: colors.background,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(30.0),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                IconButton(
+                    icon: Image.asset('assets/images/back_1.png',
+                        width: 24, color: colors.textDark),
+                    padding: EdgeInsets.zero,
+                    alignment: Alignment.centerLeft,
+                    onPressed: () => Navigator.pop(context)),
+                const SizedBox(height: 20),
+                Text(loc.loc('set_new_password'),
+                    style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        color: colors.textDark)),
+                const SizedBox(height: 10),
+                Text(loc.loc('set_new_password_desc'),
+                    style: TextStyle(
+                        fontSize: 11, color: colors.textGrey, height: 1.5)),
+                const SizedBox(height: 30),
+                Text(loc.loc('password'),
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: colors.textDark)),
+                const SizedBox(height: 8),
+                CustomTextField(
+                  hint: loc.loc('enter_new_password'),
+                  isPassword: true,
+                  hidePassword: hide1,
+                  controller: _passwordController,
+                  onEyeTap: () => setState(() => hide1 = !hide1),
+                  validator: (val) => val == null || val.length < 6
+                      ? loc.loc('min_6_chars')
+                      : null,
+                ),
+                const SizedBox(height: 10),
+                Text(loc.loc('confirm_password'),
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: colors.textDark)),
+                const SizedBox(height: 8),
+                CustomTextField(
+                  hint: loc.loc('reenter_password'),
+                  isPassword: true,
+                  hidePassword: hide2,
+                  controller: _confirmController,
+                  onEyeTap: () => setState(() => hide2 = !hide2),
+                  validator: (val) => val != _passwordController.text
+                      ? loc.loc('mismatch')
+                      : null,
+                ),
+                const SizedBox(height: 20),
+                GradientButton(
+                    text: loc.loc('confirm_btn'), onPressed: _updatePassword),
+              ],
             ),
           ),
         ),
@@ -380,65 +374,64 @@ class SuccessResetScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final loc = AppLocalizations.of(context);
+
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(gradient: AppColors.backgroundGradient),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(30.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Align(
-                  alignment: Alignment.topLeft,
-                  child: IconButton(
-                      icon: Image.asset('assets/images/back_1.png', width: 24),
-                      onPressed: () => Navigator.pop(context)),
-                ),
-                const Spacer(),
+      backgroundColor: colors.background,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(30.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Align(
+                alignment: Alignment.topLeft,
+                child: IconButton(
+                    icon: Image.asset('assets/images/back_1.png',
+                        width: 24, color: colors.textDark),
+                    onPressed: () => Navigator.pop(context)),
+              ),
+              const Spacer(),
 
-                // Gradient Checkmark Circle
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: AppColors.primaryGradient,
-                      boxShadow: [
-                        BoxShadow(
-                            color: AppColors.primary.withOpacity(0.4),
-                            blurRadius: 20)
-                      ]),
-                  child: const Center(
-                      child: Icon(Icons.check, color: Colors.white, size: 50)),
-                ),
-                const SizedBox(height: 30),
+              // Gradient Checkmark Circle
+              Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: colors.primaryGradient,
+                    boxShadow: [
+                      BoxShadow(
+                          color: colors.primary.withOpacity(0.4),
+                          blurRadius: 20)
+                    ]),
+                child: const Center(
+                    child: Icon(Icons.check, color: Colors.white, size: 50)),
+              ),
+              const SizedBox(height: 30),
 
-                const Text('Successful',
-                    style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.textDark)),
-                const SizedBox(height: 15),
-                const Text(
-                    'Congratulations Your password has been\nsuccessfully updated. Click continue to Log In.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        fontSize: 11, color: AppColors.textGrey, height: 1.5)),
+              Text(loc.loc('successful_title'),
+                  style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      color: colors.textDark)),
+              const SizedBox(height: 15),
+              Text(loc.loc('successful_reset_desc'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: 11, color: colors.textGrey, height: 1.5)),
 
-                const SizedBox(height: 40),
-                GradientButton(
-                    text: 'Continue',
-                    onPressed: () {
-                      // Pops everything off the stack and returns to the very first Log In screen
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    }),
-                const Spacer(),
-              ],
-            ),
+              const SizedBox(height: 40),
+              GradientButton(
+                  text: loc.loc('continue_btn'),
+                  onPressed: () {
+                    // Pops everything off the stack and returns to the very first Log In screen
+                    Navigator.of(context).popUntil((route) => route.isFirst);
+                  }),
+              const Spacer(),
+            ],
           ),
         ),
       ),

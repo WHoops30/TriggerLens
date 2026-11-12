@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,8 +14,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/database_service.dart';
 import '../services/notification_service.dart';
 import '../models/pantry_item.dart';
+import '../models/user_profile.dart';
 import '../utils/ui_helpers.dart';
+import '../utils/app_localizations.dart';
 import '../utils/keyword_mapping_algorithm.dart';
+import '../utils/risk_translator.dart';
 import '../widgets/consumption_modal.dart';
 import 'coach_screen.dart';
 import '../main.dart';
@@ -33,9 +37,9 @@ class _ScannerScreenState extends State<ScannerScreen>
   bool _isInitialized = false;
   bool _isFlashOn = false;
 
-  // DYNAMIC SETTINGS STATES
   bool _settingHaptic = true;
   bool _settingAutoFlash = false;
+  bool _settingAudioAlerts = true;
   bool _settingBatchScan = false;
   bool _settingStrictMode = false;
 
@@ -43,42 +47,39 @@ class _ScannerScreenState extends State<ScannerScreen>
   File? _capturedImage;
   bool _isAnalyzing = false;
 
+  bool _isRecalibrating = false;
+
   late TextRecognizer _textRecognizer;
   bool _isScanning = false;
   bool _isProcessingFrame = false;
-  Timer? _snarkTimer;
-  String _snarkyMessage = "";
+
+  bool _isAutoMode = true;
+
+  Timer? _frustrationTimer;
+  DateTime? _scanStartTime;
+  int _autoScanFailures = 0;
+
+  String _diagnosticMessage = "init_scanner";
+  List<TextBlock> _currentTextBlocks = [];
+  Size? _imageSize;
 
   bool _isLocking = false;
   Timer? _lockTimer;
   String _bestExtractedText = "";
 
-  // EXPANDED: 12 Unique Snarky Messages
-  final List<String> _snarkyMessages = [
-    "Unless this sachet is written in invisible ink, there are zero ingredients here.",
-    "I'm an OCR scanner, not a mind reader. Point me at a nutrition label!",
-    "Are you scanning an egg? Bring me a beverage sachet.",
-    "No ingredients detected. Either this is pure air, or you need to get closer.",
-    "I see a lot of things, but 'Ingredients' isn't one of them. Try rotating the sachet.",
-    "Are we scanning a blank wall today? Get me closer to the text!",
-    "My AI brain is powerful, but it can't invent ingredients that aren't in the camera frame.",
-    "Hold still! Or at least point me at the back of the packet.",
-    "Did you drink it already? Because I'm not seeing any nutritional info.",
-    "I'm looking for words like 'sugar' or 'citric acid', not your thumb.",
-    "Still waiting... Did you forget to flip the sachet over?",
-    "If this is a staring contest, you're winning. Now show me the ingredients."
-  ];
-
-  String _rawText = "Waiting for scan...";
-  String _productName = "Unnamed";
+  String _rawText = "waiting_for_scan";
+  String _productName = "unnamed";
 
   String _riskLevel = "GREEN";
   double _finalRiskScore = 0.0;
   bool _exceedsDailyCap = false;
   String _detectedTriggersText = "None";
+  String _drinkCategory = "General Beverage";
 
-  String _symptoms = "None";
-  int _symptomSeverity = 0;
+  bool _isInvalidSachet = false;
+  String _invalidSachetMessage = "";
+
+  double _activeDailyCap = 15.0;
 
   double _currentZoomLevel = 1.0;
   double _minZoomLevel = 1.0;
@@ -86,6 +87,9 @@ class _ScannerScreenState extends State<ScannerScreen>
 
   late AnimationController _laserController;
   late Animation<double> _laserAnimation;
+
+  final TextEditingController _ocrTextController = TextEditingController();
+  UserProfile? _userProfile;
 
   @override
   void initState() {
@@ -95,12 +99,9 @@ class _ScannerScreenState extends State<ScannerScreen>
     _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
 
     _laserController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    );
+        vsync: this, duration: const Duration(milliseconds: 1500));
     _laserAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _laserController, curve: Curves.easeInOutSine),
-    );
+        CurvedAnimation(parent: _laserController, curve: Curves.easeInOutSine));
 
     _initCameraAndSettings();
   }
@@ -109,8 +110,12 @@ class _ScannerScreenState extends State<ScannerScreen>
     final prefs = await SharedPreferences.getInstance();
     _settingHaptic = prefs.getBool('setting_haptic') ?? true;
     _settingAutoFlash = prefs.getBool('setting_flash') ?? false;
+    _settingAudioAlerts = prefs.getBool('setting_audio') ?? true;
     _settingBatchScan = prefs.getBool('setting_batch') ?? false;
     _settingStrictMode = prefs.getBool('setting_strictness') ?? false;
+
+    _userProfile = await widget.dbService.getUserProfile();
+    _activeDailyCap = _userProfile?.dynamicDailyCap ?? 15.0;
 
     try {
       final cameras = await availableCameras();
@@ -141,68 +146,100 @@ class _ScannerScreenState extends State<ScannerScreen>
           await _controller!.setFlashMode(FlashMode.off);
         }
 
-        _startAutoScan();
+        if (_isAutoMode) _startAutoScan();
       }
     } catch (e) {
       debugPrint("Camera Error: $e");
     }
   }
 
+  // ==========================================
+  // HARDWARE LIFECYCLE MANAGEMENT (FLASHLIGHT FIX)
+  // ==========================================
+  Future<void> _turnOffFlash() async {
+    if (_controller != null && _controller!.value.isInitialized) {
+      try {
+        await _controller!.setFlashMode(FlashMode.off);
+        if (mounted) setState(() => _isFlashOn = false);
+      } catch (e) {
+        debugPrint('Error turning off flash: \$e');
+      }
+    }
+  }
+
   void _startAutoScan() {
+    if (!_isAutoMode) return;
+
     setState(() {
-      _snarkyMessage = "";
-      _isScanning = true;
+      _diagnosticMessage = "analyzing_env";
       _isLocking = false;
       _bestExtractedText = "";
       _capturedImage = null;
+      _scanStartTime = DateTime.now();
+      _currentTextBlocks = [];
+      _isScanning = true;
+      _isInvalidSachet = false;
     });
 
     _laserController.repeat(reverse: true);
-
-    _snarkTimer?.cancel();
+    _frustrationTimer?.cancel();
     _lockTimer?.cancel();
 
-    _snarkTimer = Timer(const Duration(seconds: 10), () async {
-      if (_isLocking) return;
+    _frustrationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_isLocking || !_isAutoMode || _scanStartTime == null) return;
 
-      if (_controller != null && _controller!.value.isStreamingImages) {
-        await _controller!.stopImageStream();
-      }
-      if (mounted) {
+      int elapsed = DateTime.now().difference(_scanStartTime!).inSeconds;
+      if (elapsed >= 15 || _autoScanFailures >= 3) {
+        timer.cancel();
         setState(() {
+          _isAutoMode = false;
           _isScanning = false;
-          _snarkyMessage = (_snarkyMessages.toList()..shuffle()).first;
         });
-        if (_settingHaptic) HapticFeedback.mediumImpact();
+        _stopAutoScanEngine();
+        _showFrustrationModal();
       }
     });
 
-    _controller!.startImageStream((CameraImage image) {
-      if (_isProcessingFrame) return;
-      _isProcessingFrame = true;
-      _processCameraFrame(image);
-    });
+    if (_controller != null && !_controller!.value.isStreamingImages) {
+      _controller!.startImageStream((CameraImage image) {
+        if (_isProcessingFrame || !_isAutoMode) return;
+        _isProcessingFrame = true;
+        _processCameraFrame(image);
+      });
+    }
+  }
+
+  void _stopAutoScanEngine() async {
+    _frustrationTimer?.cancel();
+    _lockTimer?.cancel();
+    _laserController.stop();
+    if (_controller != null && _controller!.value.isStreamingImages) {
+      await _controller!.stopImageStream();
+    }
+    // Explicitly turn off flash when engine stops
+    await _turnOffFlash();
   }
 
   String _getVisuallySortedText(RecognizedText recognizedText) {
     List<TextBlock> blocks = List.from(recognizedText.blocks);
-
     blocks.sort((a, b) {
       final aTop = a.boundingBox.top;
       final bTop = b.boundingBox.top;
       final aLeft = a.boundingBox.left;
       final bLeft = b.boundingBox.left;
 
-      if ((aTop - bTop).abs() < 20.0) {
-        return aLeft.compareTo(bLeft);
-      }
+      if ((aTop - bTop).abs() < 20.0) return aLeft.compareTo(bLeft);
       return aTop.compareTo(bTop);
     });
-
     return blocks.map((b) => b.text).join('\n\n');
   }
 
   Future<void> _processCameraFrame(CameraImage image) async {
+    if (!_isAutoMode) {
+      _isProcessingFrame = false;
+      return;
+    }
+
     try {
       final WriteBuffer allBytes = WriteBuffer();
       for (final Plane plane in image.planes) {
@@ -210,7 +247,7 @@ class _ScannerScreenState extends State<ScannerScreen>
       }
       final bytes = allBytes.done().buffer.asUint8List();
 
-      final Size imageSize =
+      final Size imgSize =
           Size(image.width.toDouble(), image.height.toDouble());
       final camera = _controller!.description;
       final imageRotation =
@@ -224,17 +261,43 @@ class _ScannerScreenState extends State<ScannerScreen>
                   : InputImageFormat.bgra8888);
 
       final metadata = InputImageMetadata(
-        size: imageSize,
-        rotation: imageRotation,
-        format: inputImageFormat,
-        bytesPerRow: image.planes[0].bytesPerRow,
-      );
+          size: imgSize,
+          rotation: imageRotation,
+          format: inputImageFormat,
+          bytesPerRow: image.planes[0].bytesPerRow);
 
       final inputImage = InputImage.fromBytes(bytes: bytes, metadata: metadata);
       final RecognizedText recognizedText =
           await _textRecognizer.processImage(inputImage);
 
+      if (!_isAutoMode) return;
+
       String sortedText = _getVisuallySortedText(recognizedText);
+
+      int gibberishCount = sortedText
+          .replaceAll(RegExp(r'[a-zA-Z0-9\s,\.\(\)\[\]\-%:\/]'), '')
+          .length;
+      int totalChars = sortedText.length > 0 ? sortedText.length : 1;
+      double gibberishRatio = gibberishCount / totalChars;
+
+      String nextDiagnostic = "";
+      if (totalChars < 20) {
+        nextDiagnostic = "move_closer";
+      } else if (gibberishRatio > 0.25) {
+        nextDiagnostic = "text_distorted";
+      } else if (sortedText.length < 50 && recognizedText.blocks.length < 3) {
+        nextDiagnostic = "glare_detected";
+      } else {
+        nextDiagnostic = "scanning_text";
+      }
+
+      if (mounted) {
+        setState(() {
+          _imageSize = imgSize;
+          _currentTextBlocks = recognizedText.blocks;
+          if (!_isLocking) _diagnosticMessage = nextDiagnostic;
+        });
+      }
 
       String? isolatedIngredientsText = _autoIsolateIngredients(sortedText) ??
           _autoIsolateIngredients(recognizedText.text);
@@ -246,12 +309,13 @@ class _ScannerScreenState extends State<ScannerScreen>
           if (mounted) {
             setState(() {
               _isLocking = true;
+              _diagnosticMessage = "ingredients_detected";
             });
           }
           if (_settingHaptic) HapticFeedback.lightImpact();
 
-          _lockTimer = Timer(const Duration(milliseconds: 1800), () async {
-            _snarkTimer?.cancel();
+          _lockTimer = Timer(const Duration(milliseconds: 1500), () async {
+            _frustrationTimer?.cancel();
             if (_controller != null && _controller!.value.isStreamingImages) {
               await _controller!.stopImageStream();
             }
@@ -259,21 +323,26 @@ class _ScannerScreenState extends State<ScannerScreen>
             if (mounted) {
               try {
                 final XFile file = await _controller!.takePicture();
-                setState(() {
-                  _capturedImage = File(file.path);
-                });
+                // FIX: Turn off flash right after taking the picture
+                await _turnOffFlash();
+                setState(() => _capturedImage = File(file.path));
               } catch (e) {
-                debugPrint("Error taking auto-scan picture: $e");
+                debugPrint("Error taking auto-scan picture: \$e");
               }
             }
 
-            await _processExtractedText(
-                _bestExtractedText, "Auto-Scanned Sachet");
+            if (_bestExtractedText.length > 20) {
+              await _processExtractedText(
+                  _bestExtractedText, "Auto-Scanned Sachet");
+            } else {
+              _autoScanFailures++;
+              _startAutoScan();
+            }
           });
         }
       }
     } catch (e) {
-      debugPrint("Frame processing error: $e");
+      debugPrint("Frame processing error: \$e");
     } finally {
       if (mounted) _isProcessingFrame = false;
     }
@@ -282,7 +351,8 @@ class _ScannerScreenState extends State<ScannerScreen>
   String? _autoIsolateIngredients(String rawText) {
     String lowerText = rawText.toLowerCase();
 
-    List<String> startKeywords = [
+    int startIndex = -1;
+    List<String> explicitKeywords = [
       'ingredients:',
       'ingredients',
       'mga sangkap:',
@@ -290,11 +360,24 @@ class _ScannerScreenState extends State<ScannerScreen>
       'sangkap:',
       'contains:'
     ];
-
-    int startIndex = -1;
-    for (String keyword in startKeywords) {
+    for (String keyword in explicitKeywords) {
       startIndex = lowerText.indexOf(keyword);
       if (startIndex != -1) break;
+    }
+
+    if (startIndex == -1) {
+      List<String> words = lowerText.split(RegExp(r'\s+'));
+      int semanticScore = 0;
+      for (int i = 0; i < words.length; i++) {
+        if (KeywordMappingAlgorithm.semanticKeywords
+            .any((k) => words[i].contains(k))) {
+          semanticScore++;
+          if (semanticScore >= 3) {
+            startIndex = max(0, lowerText.indexOf(words[max(0, i - 8)]));
+            break;
+          }
+        }
+      }
     }
 
     if (startIndex == -1) return null;
@@ -332,12 +415,9 @@ class _ScannerScreenState extends State<ScannerScreen>
     ];
 
     int stopIndex = isolatedBlock.length;
-
     for (String stopWord in stopKeywords) {
       int index = lowerIsolated.indexOf(stopWord);
-      if (index > 15 && index < stopIndex) {
-        stopIndex = index;
-      }
+      if (index > 15 && index < stopIndex) stopIndex = index;
     }
 
     int doubleNewlineIndex = isolatedBlock.indexOf('\n\n', 20);
@@ -356,18 +436,125 @@ class _ScannerScreenState extends State<ScannerScreen>
     return cleanIngredients;
   }
 
+  void _showFrustrationModal() {
+    showModalBottomSheet(
+        context: context,
+        isDismissible: false,
+        backgroundColor: Colors.transparent,
+        builder: (context) {
+          final colors = AppColors.of(context);
+          final loc = AppLocalizations.of(context);
+
+          return Container(
+            padding: const EdgeInsets.all(25),
+            decoration: BoxDecoration(
+                color: colors.cardColor,
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(30))),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.support_agent, color: colors.primary, size: 50),
+                const SizedBox(height: 15),
+                Text(loc.loc('need_diff_approach'),
+                    style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                        color: colors.primaryDark)),
+                const SizedBox(height: 10),
+                Text(loc.loc('shiny_curved_desc'),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: colors.textGrey, height: 1.4)),
+                const SizedBox(height: 25),
+                Container(
+                  decoration: BoxDecoration(
+                      color:
+                          colors.isDark ? Colors.white10 : Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(
+                          color: colors.isDark
+                              ? Colors.white12
+                              : Colors.grey.shade200)),
+                  child: ListTile(
+                    leading: Icon(Icons.camera_alt, color: colors.primaryDark),
+                    title: Text(loc.loc('manual_shutter'),
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: colors.textDark)),
+                    subtitle: Text(loc.loc('take_photo_desc'),
+                        style: TextStyle(fontSize: 11, color: colors.textGrey)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _takePictureAndScan(colors);
+                    },
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  decoration: BoxDecoration(
+                      color:
+                          colors.isDark ? Colors.white10 : Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(15),
+                      border: Border.all(
+                          color: colors.isDark
+                              ? Colors.white12
+                              : Colors.grey.shade200)),
+                  child: ListTile(
+                    leading: Icon(Icons.keyboard, color: colors.primaryDark),
+                    title: Text(loc.loc('type_ingredients'),
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: colors.textDark)),
+                    subtitle: Text(loc.loc('type_ingredients_desc'),
+                        style: TextStyle(fontSize: 11, color: colors.textGrey)),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _showManualEntryModal();
+                    },
+                  ),
+                ),
+                const SizedBox(height: 15),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    setState(() {
+                      _isAutoMode = true;
+                      _autoScanFailures = 0;
+                    });
+                    _startAutoScan();
+                  },
+                  child: Text(loc.loc('keep_trying_auto'),
+                      style: TextStyle(
+                          color: colors.textGrey, fontWeight: FontWeight.bold)),
+                )
+              ],
+            ),
+          );
+        });
+  }
+
   Future<void> _processExtractedText(String text, String sourceName) async {
     try {
+      setState(() {
+        _isInvalidSachet = false;
+        _invalidSachetMessage = "";
+      });
+
       final triggers = await widget.dbService.getAllTriggers();
-      final userProfile = await widget.dbService.getUserProfile();
       double currentDailyLoad = await _calculateDailyLoad();
 
+      final allPantry = await widget.dbService.getPantryItems();
+      final now = DateTime.now();
+      final List<PantryItem> recentItems = allPantry.where((item) {
+        return now.difference(item.dateScanned).inHours <= 6;
+      }).toList();
+
       var result = KeywordMappingAlgorithm.analyze(
-          text, triggers, userProfile, currentDailyLoad);
+          text, triggers, _userProfile, currentDailyLoad, recentItems);
 
       if (_settingStrictMode && result.riskLevel == "YELLOW") {
         result = KeywordMappingAlgorithm.analyze(
-            text, triggers, userProfile, currentDailyLoad + 5.0);
+            text, triggers, _userProfile, currentDailyLoad + 5.0, recentItems);
         result.riskLevel = "RED";
       }
 
@@ -376,14 +563,17 @@ class _ScannerScreenState extends State<ScannerScreen>
           _isAnalyzing = false;
           _laserController.stop();
           _rawText = text.isEmpty ? "No text detected." : text;
+          _ocrTextController.text = _rawText;
           _riskLevel = result.riskLevel;
           _finalRiskScore = result.finalRiskScore;
           _detectedTriggersText = result.triggersSummary;
           _exceedsDailyCap = result.exceedsDailyCap;
           _productName = sourceName;
+          _drinkCategory = result.drinkCategory;
+          _activeDailyCap = _userProfile?.dynamicDailyCap ?? 15.0;
         });
 
-        if (_settingHaptic) {
+        if (_settingAudioAlerts || _settingHaptic) {
           if (_riskLevel == "RED" || _exceedsDailyCap) {
             HapticFeedback.heavyImpact();
             Future.delayed(const Duration(milliseconds: 150),
@@ -393,24 +583,115 @@ class _ScannerScreenState extends State<ScannerScreen>
           }
         }
       }
+    } on InvalidSachetException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isAnalyzing = false;
+          _laserController.stop();
+          _isInvalidSachet = true;
+          _invalidSachetMessage = e.message;
+          _rawText = text.isEmpty ? "No text detected." : text;
+          _ocrTextController.text = _rawText;
+          _productName = "Invalid Item";
+        });
+        if (_settingHaptic) HapticFeedback.heavyImpact();
+      }
     } catch (e) {
-      debugPrint("Analysis Error: $e");
+      debugPrint("Analysis Error: \$e");
+      if (mounted) {
+        setState(() {
+          _isAnalyzing = false;
+          _laserController.stop();
+        });
+      }
     }
+  }
+
+  void _showInfoModal(String title, String message, AppColors colors) {
+    HapticFeedback.lightImpact();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(30),
+        decoration: BoxDecoration(
+            color: colors.cardColor,
+            borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(30), topRight: Radius.circular(30)),
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 20,
+                  offset: const Offset(0, -5))
+            ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+                child: Container(
+                    width: 40,
+                    height: 5,
+                    decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(10)))),
+            const SizedBox(height: 25),
+            Row(
+              children: [
+                Icon(Icons.info_outline, color: colors.primary, size: 28),
+                const SizedBox(width: 15),
+                Expanded(
+                  child: Text(title,
+                      style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          color: colors.primaryDark)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 15),
+            Text(message,
+                style: TextStyle(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: colors.textDark,
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: 30),
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: colors.primary,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(15))),
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Got it',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            )
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _snarkTimer?.cancel();
+
+    // FIX: Force flash off before memory disposal
+    _turnOffFlash();
+
+    _frustrationTimer?.cancel();
     _lockTimer?.cancel();
     _laserController.dispose();
     _textRecognizer.close();
+    _ocrTextController.dispose();
 
     if (_controller != null && _controller!.value.isInitialized) {
-      if (_controller!.value.isStreamingImages) {
-        _controller!.stopImageStream();
-      }
-      _controller!.setFlashMode(FlashMode.off);
+      if (_controller!.value.isStreamingImages) _controller!.stopImageStream();
       _controller!.dispose();
     }
     super.dispose();
@@ -418,10 +699,8 @@ class _ScannerScreenState extends State<ScannerScreen>
 
   void _onFocusTap(TapDownDetails details, BoxConstraints constraints) {
     if (_controller == null || !_controller!.value.isInitialized) return;
-    final offset = Offset(
-      details.localPosition.dx / constraints.maxWidth,
-      details.localPosition.dy / constraints.maxHeight,
-    );
+    final offset = Offset(details.localPosition.dx / constraints.maxWidth,
+        details.localPosition.dy / constraints.maxHeight);
     _controller!.setFocusPoint(offset);
     _controller!.setExposurePoint(offset);
   }
@@ -442,7 +721,7 @@ class _ScannerScreenState extends State<ScannerScreen>
       await _controller!
           .setFlashMode(_isFlashOn ? FlashMode.torch : FlashMode.off);
     } catch (e) {
-      debugPrint("Flash Error: $e");
+      debugPrint("Flash Error: \$e");
     }
   }
 
@@ -451,9 +730,9 @@ class _ScannerScreenState extends State<ScannerScreen>
     if (_controller == null || !_controller!.value.isInitialized) return;
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused) {
-      if (_controller!.value.isStreamingImages) {
-        _controller!.stopImageStream();
-      }
+      // FIX: Ensure hardware is released immediately upon backgrounding
+      _turnOffFlash();
+      if (_controller!.value.isStreamingImages) _controller!.stopImageStream();
       _controller!.dispose();
       if (mounted) setState(() => _isInitialized = false);
     } else if (state == AppLifecycleState.resumed) {
@@ -475,14 +754,14 @@ class _ScannerScreenState extends State<ScannerScreen>
     return load;
   }
 
-  Future<File?> _cropImage(File imageFile) async {
+  Future<File?> _cropImage(File imageFile, AppColors colors) async {
     final croppedFile = await ImageCropper().cropImage(
       sourcePath: imageFile.path,
       compressQuality: 100,
       uiSettings: [
         AndroidUiSettings(
             toolbarTitle: 'Crop Ingredients',
-            toolbarColor: AppColors.primary,
+            toolbarColor: colors.primary,
             toolbarWidgetColor: Colors.white,
             initAspectRatio: CropAspectRatioPreset.original,
             lockAspectRatio: false,
@@ -490,29 +769,27 @@ class _ScannerScreenState extends State<ScannerScreen>
         IOSUiSettings(title: 'Crop Ingredients'),
       ],
     );
-    if (croppedFile != null) {
-      return File(croppedFile.path);
-    }
+    if (croppedFile != null) return File(croppedFile.path);
     return null;
   }
 
-  Future<void> _pickFromGallery() async {
+  Future<void> _pickFromGallery(AppColors colors) async {
     try {
-      if (_controller != null && _controller!.value.isStreamingImages) {
-        await _controller!.stopImageStream();
-      }
-      _snarkTimer?.cancel();
-      _lockTimer?.cancel();
+      _stopAutoScanEngine();
+      setState(() {
+        _isScanning = false;
+        _isProcessingFrame = true;
+      });
 
       final pickedFile = await _picker.pickImage(source: ImageSource.gallery);
       if (pickedFile == null) {
-        _startAutoScan();
+        if (_isAutoMode) _startAutoScan();
         return;
       }
 
-      File? cropped = await _cropImage(File(pickedFile.path));
+      File? cropped = await _cropImage(File(pickedFile.path), colors);
       if (cropped == null) {
-        _startAutoScan();
+        if (_isAutoMode) _startAutoScan();
         return;
       }
 
@@ -524,30 +801,43 @@ class _ScannerScreenState extends State<ScannerScreen>
       _laserController.repeat(reverse: true);
       await _processImageForOCR(cropped.path, "Gallery Upload");
     } catch (e) {
-      debugPrint("Gallery Error: $e");
+      debugPrint("Gallery Error: \$e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Failed to load image. Please try again."),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        setState(() {
+          _capturedImage = null;
+          _isAnalyzing = false;
+        });
+        if (_isAutoMode) _startAutoScan();
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessingFrame = false);
+      }
     }
   }
 
-  Future<void> _takePictureAndScan() async {
+  Future<void> _takePictureAndScan(AppColors colors) async {
     if (_controller == null || !_controller!.value.isInitialized) return;
-
     try {
-      if (_controller!.value.isStreamingImages) {
-        await _controller!.stopImageStream();
-      }
-      _snarkTimer?.cancel();
-      _lockTimer?.cancel();
+      _stopAutoScanEngine();
+      setState(() {
+        _isScanning = false;
+        _isProcessingFrame = true;
+      });
 
       final image = await _controller!.takePicture();
+      // FIX: Ensure flash is off after manual shot
+      await _turnOffFlash();
 
-      if (_isFlashOn) {
-        await _controller!.setFlashMode(FlashMode.off);
-        _isFlashOn = false;
-      }
-
-      File? cropped = await _cropImage(File(image.path));
+      File? cropped = await _cropImage(File(image.path), colors);
       if (cropped == null) {
-        _startAutoScan();
+        if (_isAutoMode) _startAutoScan();
         return;
       }
 
@@ -559,7 +849,25 @@ class _ScannerScreenState extends State<ScannerScreen>
       _laserController.repeat(reverse: true);
       await _processImageForOCR(cropped.path, "Scanned Sachet");
     } catch (e) {
-      debugPrint("Capture Error: $e");
+      debugPrint("Capture Error: \$e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                "Failed to capture image. Please check camera permissions."),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        setState(() {
+          _capturedImage = null;
+          _isAnalyzing = false;
+        });
+        if (_isAutoMode) _startAutoScan();
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessingFrame = false);
+      }
     }
   }
 
@@ -568,96 +876,123 @@ class _ScannerScreenState extends State<ScannerScreen>
       final inputImage = InputImage.fromFilePath(imagePath);
       final RecognizedText recognizedText =
           await _textRecognizer.processImage(inputImage);
-
       String sortedText = _getVisuallySortedText(recognizedText);
-
       String isolatedIngredientsText = _autoIsolateIngredients(sortedText) ??
           _autoIsolateIngredients(recognizedText.text) ??
           sortedText;
 
       await _processExtractedText(isolatedIngredientsText, defaultName);
     } catch (e) {
-      debugPrint("Manual OCR Error: $e");
+      debugPrint("Manual OCR Error: \$e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Could not analyze text. Please try again."),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+        setState(() {
+          _isAnalyzing = false;
+          _capturedImage = null;
+        });
+      }
     }
   }
 
-  Future<void> _saveToDatabase() async {
-    final contextData = await ConsumptionModal.show(context, _productName);
+  Future<void> _saveToDatabase(
+      bool isConsumed, AppColors colors, AppLocalizations loc) async {
+    try {
+      Map<String, dynamic>? contextData;
 
-    if (contextData == null) return;
+      if (isConsumed) {
+        contextData =
+            await ConsumptionModal.show(context, _productName, _drinkCategory);
+        if (contextData == null) return;
+      }
 
-    String? permanentImagePath;
-
-    if (_capturedImage != null && _capturedImage!.path != 'manual_entry') {
-      try {
+      String? permanentImagePath;
+      if (_capturedImage != null && _capturedImage!.path != 'manual_entry') {
         final directory = await getApplicationDocumentsDirectory();
         final String fileName =
-            'sachet_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final String newPath = '${directory.path}/$fileName';
+            'sachet_\${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final String newPath = '\${directory.path}/\$fileName';
         final File savedImage = await _capturedImage!.copy(newPath);
         permanentImagePath = savedImage.path;
-      } catch (e) {
-        debugPrint("Error saving permanent image: $e");
       }
-    }
 
-    final newItem = PantryItem()
-      ..name = _productName
-      ..dateScanned = DateTime.now()
-      ..symptoms = _symptoms == "None" ? "" : _symptoms
-      ..riskLevel = _riskLevel
-      ..isFavorite = false
-      ..rawText = _rawText
-      ..acidScore = _finalRiskScore.round()
-      ..imagePath = permanentImagePath
-      ..isEmptyStomach = contextData['isEmptyStomach'] ?? false
-      ..isDiluted = contextData['isDiluted'] ?? false;
+      double finalStoredScore = _finalRiskScore;
+      if (isConsumed && contextData != null) {
+        finalStoredScore = RiskTranslator.calculateTrueAcidLoad(_finalRiskScore,
+            contextData['portionCount'], contextData['portionMeasurement']);
+      }
 
-    await widget.dbService.savePantryItem(newItem);
+      final newItem = PantryItem()
+        ..name = _productName
+        ..dateScanned = DateTime.now()
+        ..symptoms = ""
+        ..riskLevel = _riskLevel
+        ..isFavorite = false
+        ..rawText = _rawText
+        ..acidScore = finalStoredScore.round()
+        ..imagePath = permanentImagePath
+        ..isEmptyStomach = contextData?['isEmptyStomach'] ?? false
+        ..isDiluted = contextData?['isDiluted'] ?? false
+        ..isConsumed = isConsumed
+        ..drinkCategory = _drinkCategory
+        ..portionMeasurement = contextData?['portionMeasurement'] ?? "Sachet"
+        ..portionCount = contextData?['portionCount'] ?? 1.0;
 
-    final notifService = NotificationService();
+      await widget.dbService.savePantryItem(newItem);
 
-    notifService.scheduleTargetedNotification(
-      id: NotificationService.digestionTimerId,
-      title: 'Digestion Complete',
-      body:
-          'It has been 4 hours since your last drink. Your stomach load has reset.',
-      delay: const Duration(hours: 4),
-    );
+      if (isConsumed) {
+        final notifService = NotificationService();
+        notifService.scheduleTargetedNotification(
+            id: NotificationService.digestionTimerId,
+            title: loc.loc('digestion_complete_title'),
+            body: loc.loc('digestion_complete_body', {'name': newItem.name}),
+            delay: const Duration(hours: 6));
 
-    if (newItem.isEmptyStomach && !newItem.isDiluted) {
-      notifService.scheduleTargetedNotification(
-        id: NotificationService.hydrationChaserId,
-        title: 'Acid Buffer Reminder',
-        body:
-            'Since you had ${newItem.name} on an empty stomach, slowly sip some water now to coat your stomach lining.',
-        delay: const Duration(minutes: 15),
-      );
-    }
+        if (newItem.isEmptyStomach && !newItem.isDiluted) {
+          notifService.scheduleTargetedNotification(
+              id: NotificationService.hydrationChaserId,
+              title: loc.loc('acid_buffer_reminder'),
+              body: loc.loc('acid_buffer_body', {'name': newItem.name}),
+              delay: const Duration(minutes: 15));
+        }
 
-    if ((newItem.riskLevel == "RED" || newItem.riskLevel == "YELLOW") &&
-        (newItem.symptoms.isEmpty || newItem.symptoms == "None")) {
-      notifService.scheduleTargetedNotification(
-        id: NotificationService.symptomCheckinId,
-        title: 'Symptom Check-In',
-        body:
-            'How is your stomach feeling after drinking ${newItem.name}? Tap to log any discomfort.',
-        delay: const Duration(minutes: 45),
-      );
-    }
+        if (newItem.riskLevel == "RED" || newItem.riskLevel == "YELLOW") {
+          notifService.scheduleTargetedNotification(
+              id: NotificationService.symptomCheckinId,
+              title: loc.loc('symptom_checkin_title'),
+              body: loc.loc('symptom_checkin_body', {'name': newItem.name}),
+              delay: const Duration(minutes: 45));
+        }
+      }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Item Consumed & Saved!'),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(isConsumed
+                ? loc.loc('item_consumed_logged', {'name': newItem.name})
+                : loc.loc('saved_to_pantry')),
+            backgroundColor: colors.successGreen,
+            behavior: SnackBarBehavior.floating));
 
-      if (_settingBatchScan) {
-        _startAutoScan();
-      } else {
-        Navigator.pop(context);
+        if (_settingBatchScan) {
+          if (_isAutoMode) _startAutoScan();
+        } else {
+          // Navigating away from scanner screen, hardware resources will be handled in dispose() automatically
+          Navigator.pop(context);
+        }
+      }
+    } catch (e) {
+      debugPrint("Save To Database Error: \$e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Failed to save. Please check device storage."),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
       }
     }
   }
@@ -667,351 +1002,53 @@ class _ScannerScreenState extends State<ScannerScreen>
         TextEditingController(text: _productName);
     showDialog(
       context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Container(
-          padding: const EdgeInsets.all(25),
-          decoration: BoxDecoration(
-              color: Colors.white, borderRadius: BorderRadius.circular(20)),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Name This Drink',
-                  style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      fontSize: 18,
-                      color: AppColors.primaryDark)),
-              const SizedBox(height: 20),
-              TextField(
-                controller: nameController,
-                decoration: InputDecoration(
-                  hintText: 'e.g., Nescafe 3-in-1',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15)),
-                  focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                      borderSide: const BorderSide(color: AppColors.primary)),
-                ),
-              ),
-              const SizedBox(height: 25),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(15))),
-                  onPressed: () {
-                    setState(() {
-                      _productName = nameController.text.isEmpty
-                          ? "Unnamed"
-                          : nameController.text;
-                    });
-                    Navigator.pop(context);
-                  },
-                  child: const Text('Save Name',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16)),
-                ),
-              )
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showManualEntryModal() {
-    final textController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-              color: Colors.white, borderRadius: BorderRadius.circular(20)),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(context)),
-                  const Text('Manual Entry',
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  const SizedBox(width: 48),
-                ],
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: textController,
-                maxLines: 5,
-                decoration: InputDecoration(
-                  hintText: 'Type ingredients separated by commas...',
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15)),
-                  focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(15),
-                      borderSide: const BorderSide(color: AppColors.primary)),
-                ),
-              ),
-              const SizedBox(height: 20),
-              GradientButton(
-                text: 'Analyze',
-                onPressed: () async {
-                  final text = textController.text;
-                  Navigator.pop(context);
-
-                  if (_controller != null &&
-                      _controller!.value.isStreamingImages) {
-                    await _controller!.stopImageStream();
-                  }
-                  _snarkTimer?.cancel();
-                  _lockTimer?.cancel();
-
-                  setState(() {
-                    _capturedImage = File('manual_entry');
-                  });
-
-                  await _processExtractedText(
-                      text.isEmpty ? "No text provided." : text,
-                      "Manual Entry");
-                },
-              )
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showDeleteModal() {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-        child: Container(
-          padding: const EdgeInsets.all(30),
-          decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(30)),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Align(
-                  alignment: Alignment.centerLeft,
-                  child: IconButton(
-                      icon: Image.asset('assets/images/back_1.png',
-                          width: 24, color: Colors.white),
-                      onPressed: () => Navigator.pop(context),
-                      padding: EdgeInsets.zero)),
-              const SizedBox(height: 10),
-              const Text('Discard Scan?',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 32,
-                      fontWeight: FontWeight.w900)),
-              const SizedBox(height: 20),
-              const Text(
-                  'Are you sure you want to discard this scanned product? It will not be saved to your pantry.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: Colors.white, fontSize: 16, height: 1.5)),
-              const SizedBox(height: 30),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white.withOpacity(0.2),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20)),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 25, vertical: 12)),
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel',
-                        style: TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.bold)),
-                  ),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20)),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 25, vertical: 12)),
-                    onPressed: () {
-                      Navigator.pop(context);
-                      setState(() => _capturedImage = null);
-                      _startAutoScan();
-                    },
-                    child: const Text('Discard',
-                        style: TextStyle(
-                            color: AppColors.primaryDark,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              )
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showSymptomsModal() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(builder: (context, setModalState) {
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.65,
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(30), topRight: Radius.circular(30)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(30.0),
+      builder: (context) {
+        final colors = AppColors.of(context);
+        final loc = AppLocalizations.of(context);
+        return Dialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Container(
+            padding: const EdgeInsets.all(25),
+            decoration: BoxDecoration(
+                color: colors.cardColor,
+                borderRadius: BorderRadius.circular(20)),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Center(
-                    child: Container(
-                        width: 40,
-                        height: 5,
-                        decoration: BoxDecoration(
-                            color: Colors.grey.shade300,
-                            borderRadius: BorderRadius.circular(10)))),
+                Text(loc.loc('name_this_drink'),
+                    style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 18,
+                        color: colors.primaryDark)),
                 const SizedBox(height: 20),
-                const Row(
-                  children: [
-                    Icon(Icons.local_fire_department,
-                        color: Colors.orange, size: 36),
-                    SizedBox(width: 15),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Log a Symptom',
-                              style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w900,
-                                  color: AppColors.textDark)),
-                          Text('Track how you feel after this product',
-                              style: TextStyle(
-                                  fontSize: 12,
-                                  color: AppColors.textGrey,
-                                  fontWeight: FontWeight.w500)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: Colors.grey.shade200),
-                              boxShadow: [
-                                BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 5))
-                              ]),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                  'What symptoms are you currently experiencing?',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      color: AppColors.textDark)),
-                              const SizedBox(height: 10),
-                              _buildSymptomRadio('Burning pain', setModalState),
-                              _buildSymptomRadio('Nausea', setModalState),
-                              _buildSymptomRadio(
-                                  'Excessive burping', setModalState),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: Colors.grey.shade200),
-                              boxShadow: [
-                                BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 5))
-                              ]),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                  'On a scale of 1 to 10, how severe is your discomfort right now?',
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      color: AppColors.textDark)),
-                              Row(
-                                children: [
-                                  Expanded(
-                                      child: Slider(
-                                          value: _symptomSeverity.toDouble(),
-                                          min: 0,
-                                          max: 10,
-                                          divisions: 10,
-                                          activeColor: AppColors.primary,
-                                          onChanged: (val) => setModalState(
-                                              () => _symptomSeverity =
-                                                  val.toInt()))),
-                                  Text('$_symptomSeverity',
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.w900,
-                                          fontSize: 18,
-                                          color: AppColors.primary)),
-                                ],
-                              )
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                      ],
-                    ),
-                  ),
-                ),
+                TextField(
+                    controller: nameController,
+                    style: TextStyle(color: colors.textDark),
+                    decoration: InputDecoration(
+                        hintText: loc.loc('eg_nescafe'),
+                        hintStyle: TextStyle(color: colors.textGrey),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15)),
+                        focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: colors.primary)))),
+                const SizedBox(height: 25),
                 SizedBox(
                   width: double.infinity,
-                  height: 55,
+                  height: 50,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: colors.primary,
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30))),
+                            borderRadius: BorderRadius.circular(15))),
                     onPressed: () {
-                      setState(() {});
+                      setState(() => _productName = nameController.text.isEmpty
+                          ? loc.loc('unnamed')
+                          : nameController.text);
                       Navigator.pop(context);
                     },
-                    child: const Text('Save Log',
-                        style: TextStyle(
+                    child: Text(loc.loc('save_name'),
+                        style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
                             fontSize: 16)),
@@ -1021,101 +1058,261 @@ class _ScannerScreenState extends State<ScannerScreen>
             ),
           ),
         );
-      }),
+      },
     );
   }
 
-  Widget _buildSymptomRadio(String title, Function setModalState) {
-    return InkWell(
-      onTap: () => setModalState(() => _symptoms = title),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-          children: [
-            Icon(
-                _symptoms == title
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_unchecked,
-                color: _symptoms == title ? AppColors.primary : Colors.grey,
-                size: 18),
-            const SizedBox(width: 10),
-            Text(title,
-                style: const TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textDark,
-                    fontWeight: FontWeight.w500)),
-          ],
-        ),
-      ),
+  void _showManualEntryModal() {
+    final textController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) {
+        final colors = AppColors.of(context);
+        final loc = AppLocalizations.of(context);
+        return Dialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+                color: colors.cardColor,
+                borderRadius: BorderRadius.circular(20)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    IconButton(
+                        icon: Icon(Icons.close, color: colors.textDark),
+                        onPressed: () => Navigator.pop(context)),
+                    Expanded(
+                      child: Text(loc.loc('manual_entry'),
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: colors.textDark)),
+                    ),
+                    const SizedBox(width: 48), // Balances the close icon
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                    controller: textController,
+                    maxLines: 5,
+                    style: TextStyle(color: colors.textDark),
+                    decoration: InputDecoration(
+                        hintText: loc.loc('type_ingredients_hint'),
+                        hintStyle: TextStyle(color: colors.textGrey),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(15)),
+                        focusedBorder: OutlineInputBorder(
+                            borderSide: BorderSide(color: colors.primary)))),
+                const SizedBox(height: 20),
+                GradientButton(
+                  text: loc.loc('analyze'),
+                  onPressed: () async {
+                    final text = textController.text;
+                    Navigator.pop(context);
+
+                    _stopAutoScanEngine();
+                    setState(() => _capturedImage = File('manual_entry'));
+
+                    await _processExtractedText(
+                        text.isEmpty ? loc.loc('no_text_provided') : text,
+                        loc.loc('manual_entry'));
+                  },
+                )
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
-  String _getRiskLevelText() {
-    if (_riskLevel == "RED") return "High Danger";
-    if (_riskLevel == "YELLOW") return "Moderate Risk";
-    return "Safe to Consume";
+  String _getRiskLevelText(AppLocalizations loc) {
+    if (_riskLevel == "RED") return loc.loc('high_danger');
+    if (_riskLevel == "YELLOW") return loc.loc('moderate_risk');
+    return loc.loc('safe_to_consume');
   }
 
-  Color _getRiskColor() {
-    if (_riskLevel == "RED") return AppColors.errorRed;
-    if (_riskLevel == "YELLOW") return AppColors.accentOrange;
-    return Colors.green;
+  Color _getRiskColor(AppColors colors) {
+    if (_riskLevel == "RED") return colors.errorRed;
+    if (_riskLevel == "YELLOW") return colors.accentOrange;
+    return colors.successGreen;
   }
 
-  Widget _buildResultBottomBar() {
+  Widget _buildScannerClinicalUI(String summary, AppColors colors) {
+    if (summary.contains("No known stomach triggers") ||
+        summary.contains("Great news")) {
+      return Text(summary,
+          style: const TextStyle(
+              color: Colors.greenAccent, fontWeight: FontWeight.bold));
+    }
+
+    final List<String> parts = summary.split('\n\n');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: parts.map((part) {
+        if (part.contains('⚠️ COMPOUND SYNERGY')) {
+          return Container(
+            margin: const EdgeInsets.only(top: 10, bottom: 10),
+            padding: const EdgeInsets.all(15),
+            decoration: BoxDecoration(
+              color: Colors.redAccent.shade700,
+              borderRadius: BorderRadius.circular(15),
+              boxShadow: const [
+                BoxShadow(color: Colors.black26, blurRadius: 5)
+              ],
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_rounded,
+                    color: Colors.white, size: 24),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    part
+                        .replaceAll(
+                            '⚠️ COMPOUND SYNERGY: ', 'COMPOUND SYNERGY:\n')
+                        .trim(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        } else if (part.startsWith('Clinical Analysis:')) {
+          return Text(
+            part,
+            style: const TextStyle(
+              color: Colors.white,
+              height: 1.5,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          );
+        } else {
+          return Container(
+            margin: const EdgeInsets.only(top: 10),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              part,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontStyle: FontStyle.italic,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          );
+        }
+      }).toList(),
+    );
+  }
+
+  Widget _buildResultBottomBar(AppColors colors, AppLocalizations loc) {
     return Container(
       padding: const EdgeInsets.only(left: 20, right: 20, top: 15, bottom: 30),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 20,
-              offset: const Offset(0, -5))
-        ],
-      ),
+      decoration: BoxDecoration(color: colors.cardColor, boxShadow: [
+        BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 20,
+            offset: const Offset(0, -5))
+      ]),
       child: SafeArea(
         top: false,
         child: Row(
           children: [
             InkWell(
-              onTap: _showDeleteModal,
-              child: Container(
-                width: 60,
+                onTap: () {
+                  setState(() {
+                    _capturedImage = null;
+                  });
+                  if (_isAutoMode) _startAutoScan();
+                },
+                child: Container(
+                    width: 75,
+                    height: 60,
+                    decoration: BoxDecoration(
+                        color: colors.isDark
+                            ? Colors.white12
+                            : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                            color: colors.isDark
+                                ? Colors.white24
+                                : Colors.grey.shade300)),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.refresh, color: colors.textDark, size: 24),
+                        const SizedBox(height: 4),
+                        Text(loc.loc('scan_again'),
+                            style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: colors.textDark))
+                      ],
+                    ))),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SizedBox(
                 height: 60,
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(20),
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      side: BorderSide(
+                          color:
+                              _isInvalidSachet ? Colors.grey : colors.primary,
+                          width: 2),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20))),
+                  onPressed: _isInvalidSachet
+                      ? null
+                      : () => _saveToDatabase(false, colors, loc),
+                  child: Text(loc.loc('save_to_pantry_btn'),
+                      style: TextStyle(
+                          color:
+                              _isInvalidSachet ? Colors.grey : colors.primary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900)),
                 ),
-                child: const Icon(Icons.delete_outline,
-                    color: Colors.red, size: 28),
               ),
             ),
-            const SizedBox(width: 15),
+            const SizedBox(width: 10),
             Expanded(
               child: SizedBox(
                 height: 60,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    padding: EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20)),
-                    elevation: 0,
-                  ),
-                  onPressed: _saveToDatabase,
-                  child: Ink(
-                    decoration: BoxDecoration(
-                      gradient: AppColors.primaryGradient,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Center(
-                      child: Text('Consumed',
-                          style: TextStyle(
+                      backgroundColor:
+                          _isInvalidSachet ? Colors.grey : colors.primary,
+                      padding: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20)),
+                      elevation: 0),
+                  onPressed: _isInvalidSachet
+                      ? null
+                      : () => _saveToDatabase(true, colors, loc),
+                  child: Center(
+                      child: Text(loc.loc('consume_now'),
+                          style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900)),
-                    ),
-                  ),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900))),
                 ),
               ),
             ),
@@ -1127,27 +1324,36 @@ class _ScannerScreenState extends State<ScannerScreen>
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final loc = AppLocalizations.of(context);
+
     bool isResultView = _capturedImage != null;
 
+    double impactPercentage = (_finalRiskScore / _activeDailyCap) * 100;
+    if (impactPercentage > 100) impactPercentage = 100;
+    if (impactPercentage.isNaN || impactPercentage.isInfinite) {
+      impactPercentage = 0;
+    }
+
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: colors.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
             icon: Image.asset('assets/images/back_1.png',
-                width: 24, color: AppColors.primaryDark),
+                width: 24, color: colors.primaryDark),
             onPressed: () {
               if (isResultView) {
                 setState(() => _capturedImage = null);
-                _startAutoScan();
+                if (_isAutoMode) _startAutoScan();
               } else {
                 Navigator.pop(context);
               }
             }),
-        title: Text(isResultView ? '' : 'Auto-Scan Mode',
-            style: const TextStyle(
-                color: AppColors.primaryDark,
+        title: Text(isResultView ? '' : 'TriggerLens',
+            style: TextStyle(
+                color: colors.primaryDark,
                 fontWeight: FontWeight.w900,
                 fontSize: 24)),
         centerTitle: true,
@@ -1160,15 +1366,82 @@ class _ScannerScreenState extends State<ScannerScreen>
                   const EdgeInsets.symmetric(horizontal: 25.0, vertical: 10),
               child: Column(
                 children: [
+                  if (!isResultView)
+                    Container(
+                        margin: const EdgeInsets.only(bottom: 20),
+                        padding: const EdgeInsets.all(5),
+                        decoration: BoxDecoration(
+                            color: colors.cardColor,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                                color: colors.isDark
+                                    ? Colors.white12
+                                    : Colors.grey.shade200)),
+                        child: Row(
+                          children: [
+                            Expanded(
+                                child: GestureDetector(
+                                    onTap: () {
+                                      if (!_isAutoMode) {
+                                        setState(() => _isAutoMode = true);
+                                        _startAutoScan();
+                                      }
+                                    },
+                                    child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 12),
+                                        decoration: BoxDecoration(
+                                            color: _isAutoMode
+                                                ? colors.primary
+                                                : Colors.transparent,
+                                            borderRadius:
+                                                BorderRadius.circular(15)),
+                                        child: Center(
+                                            child: Text(
+                                                loc.loc('auto_scan_mode'),
+                                                style: TextStyle(
+                                                    color: _isAutoMode
+                                                        ? Colors.white
+                                                        : colors.textGrey,
+                                                    fontWeight:
+                                                        FontWeight.bold)))))),
+                            Expanded(
+                                child: GestureDetector(
+                                    onTap: () {
+                                      if (_isAutoMode) {
+                                        setState(() => _isAutoMode = false);
+                                        _stopAutoScanEngine();
+                                      }
+                                    },
+                                    child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 12),
+                                        decoration: BoxDecoration(
+                                            color: !_isAutoMode
+                                                ? colors.primary
+                                                : Colors.transparent,
+                                            borderRadius:
+                                                BorderRadius.circular(15)),
+                                        child: Center(
+                                            child: Text(
+                                                loc.loc('manual_shutter'),
+                                                style: TextStyle(
+                                                    color: !_isAutoMode
+                                                        ? Colors.white
+                                                        : colors.textGrey,
+                                                    fontWeight:
+                                                        FontWeight.bold))))))
+                          ],
+                        )),
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: colors.cardColor,
                         borderRadius: BorderRadius.circular(30),
                         boxShadow: [
                           BoxShadow(
-                              color: AppColors.primary.withOpacity(0.1),
+                              color: colors.primary.withOpacity(0.1),
                               blurRadius: 20,
                               offset: const Offset(0, 10))
                         ]),
@@ -1181,19 +1454,20 @@ class _ScannerScreenState extends State<ScannerScreen>
                             child: isResultView
                                 ? (_capturedImage!.path == 'manual_entry'
                                     ? Container(
-                                        color: AppColors.background,
+                                        color: colors.background,
                                         child: Column(
                                             mainAxisAlignment:
                                                 MainAxisAlignment.center,
-                                            children: const [
+                                            children: [
                                               Icon(Icons.check_circle_outline,
-                                                  color: AppColors.primary,
+                                                  color: colors.primary,
                                                   size: 60),
-                                              SizedBox(height: 15),
-                                              Text('Manual Entry Analysis',
+                                              const SizedBox(height: 15),
+                                              Text(
+                                                  loc.loc(
+                                                      'manual_entry_analysis'),
                                                   style: TextStyle(
-                                                      color:
-                                                          AppColors.primaryDark,
+                                                      color: colors.primaryDark,
                                                       fontWeight:
                                                           FontWeight.bold))
                                             ]))
@@ -1207,27 +1481,28 @@ class _ScannerScreenState extends State<ScannerScreen>
                                               animation: _laserAnimation,
                                               builder: (context, child) {
                                                 return Positioned(
-                                                  top: _laserAnimation.value *
-                                                      (MediaQuery.of(context)
-                                                              .size
-                                                              .width -
-                                                          50),
-                                                  left: 0,
-                                                  right: 0,
-                                                  child: Container(
-                                                    height: 3,
-                                                    decoration: BoxDecoration(
-                                                      color: AppColors.primary,
-                                                      boxShadow: [
-                                                        BoxShadow(
-                                                            color: AppColors
-                                                                .primaryLight,
-                                                            blurRadius: 10,
-                                                            spreadRadius: 3)
-                                                      ],
-                                                    ),
-                                                  ),
-                                                );
+                                                    top: _laserAnimation.value *
+                                                        (MediaQuery.of(context)
+                                                                .size
+                                                                .width -
+                                                            50),
+                                                    left: 0,
+                                                    right: 0,
+                                                    child: Container(
+                                                        height: 3,
+                                                        decoration:
+                                                            BoxDecoration(
+                                                                color: colors
+                                                                    .primary,
+                                                                boxShadow: [
+                                                              BoxShadow(
+                                                                  color: colors
+                                                                      .primaryLight,
+                                                                  blurRadius:
+                                                                      10,
+                                                                  spreadRadius:
+                                                                      3)
+                                                            ])));
                                               },
                                             ),
                                         ],
@@ -1244,113 +1519,127 @@ class _ScannerScreenState extends State<ScannerScreen>
                                                         details, constraints),
                                                 onScaleUpdate: _onScaleUpdate,
                                                 child: FittedBox(
-                                                  fit: BoxFit.cover,
-                                                  child: SizedBox(
-                                                    width: _controller!.value
-                                                        .previewSize!.height,
-                                                    height: _controller!.value
-                                                        .previewSize!.width,
-                                                    child: CameraPreview(
-                                                        _controller!),
+                                                    fit: BoxFit.cover,
+                                                    child: SizedBox(
+                                                        width: _controller!
+                                                            .value
+                                                            .previewSize!
+                                                            .height,
+                                                        height: _controller!
+                                                            .value
+                                                            .previewSize!
+                                                            .width,
+                                                        child: CameraPreview(
+                                                            _controller!))),
+                                              ),
+                                              if (_imageSize != null &&
+                                                  _isScanning &&
+                                                  _isAutoMode)
+                                                Positioned.fill(
+                                                  child: CustomPaint(
+                                                    painter:
+                                                        _TextBoundingBoxPainter(
+                                                      _currentTextBlocks,
+                                                      _imageSize!,
+                                                    ),
                                                   ),
                                                 ),
-                                              ),
-                                              Center(
-                                                child: Column(
-                                                  mainAxisSize:
-                                                      MainAxisSize.min,
-                                                  children: [
-                                                    Container(
-                                                      width: 260,
-                                                      height: 160,
-                                                      decoration: BoxDecoration(
-                                                          border: Border.all(
+                                              if (_isAutoMode)
+                                                Center(
+                                                  child: Column(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Container(
+                                                          width: 260,
+                                                          height: 160,
+                                                          decoration: BoxDecoration(
+                                                              border: Border.all(
+                                                                  color: _isLocking
+                                                                      ? Colors
+                                                                          .green
+                                                                      : colors
+                                                                          .primaryLight
+                                                                          .withOpacity(
+                                                                              0.8),
+                                                                  width: 3),
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                          20),
+                                                              boxShadow: [
+                                                                BoxShadow(
+                                                                    color: _isLocking
+                                                                        ? Colors
+                                                                            .green
+                                                                            .withOpacity(
+                                                                                0.2)
+                                                                        : colors
+                                                                            .primary
+                                                                            .withOpacity(
+                                                                                0.2),
+                                                                    blurRadius:
+                                                                        15,
+                                                                    spreadRadius:
+                                                                        2)
+                                                              ])),
+                                                      const SizedBox(
+                                                          height: 15),
+                                                      Container(
+                                                          padding: const EdgeInsets.symmetric(
+                                                              horizontal: 15,
+                                                              vertical: 8),
+                                                          decoration: BoxDecoration(
                                                               color: _isLocking
                                                                   ? Colors.green
-                                                                  : AppColors
-                                                                      .primaryLight
                                                                       .withOpacity(
-                                                                          0.8),
-                                                              width: 3),
-                                                          borderRadius:
-                                                              BorderRadius
-                                                                  .circular(20),
-                                                          boxShadow: [
-                                                            BoxShadow(
-                                                                color: _isLocking
-                                                                    ? Colors
-                                                                        .green
-                                                                        .withOpacity(
-                                                                            0.2)
-                                                                    : AppColors
-                                                                        .primary
-                                                                        .withOpacity(
-                                                                            0.2),
-                                                                blurRadius: 15,
-                                                                spreadRadius: 2)
-                                                          ]),
-                                                    ),
-                                                    const SizedBox(height: 15),
-                                                    Container(
-                                                      padding: const EdgeInsets
-                                                          .symmetric(
-                                                          horizontal: 15,
-                                                          vertical: 8),
-                                                      decoration: BoxDecoration(
-                                                        color: _isLocking
-                                                            ? Colors.green
-                                                                .withOpacity(
-                                                                    0.8)
-                                                            : Colors.black
-                                                                .withOpacity(
-                                                                    0.6),
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(20),
-                                                      ),
-                                                      child: Text(
-                                                        _isLocking
-                                                            ? 'Ingredients found! Hold still...'
-                                                            : 'Auto-scanning for "Ingredients"...',
-                                                        style: const TextStyle(
-                                                            color: Colors.white,
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                            fontSize: 12),
-                                                      ),
-                                                    ),
-                                                  ],
+                                                                          0.8)
+                                                                  : Colors.black
+                                                                      .withOpacity(
+                                                                          0.7),
+                                                              borderRadius:
+                                                                  BorderRadius.circular(
+                                                                      20)),
+                                                          child: Text(loc.loc(_diagnosticMessage),
+                                                              style: const TextStyle(
+                                                                  color: Colors
+                                                                      .white,
+                                                                  fontWeight:
+                                                                      FontWeight
+                                                                          .bold,
+                                                                  fontSize:
+                                                                      12))),
+                                                    ],
+                                                  ),
                                                 ),
-                                              ),
-                                              AnimatedBuilder(
-                                                animation: _laserAnimation,
-                                                builder: (context, child) {
-                                                  return Positioned(
-                                                    top: _laserAnimation.value *
-                                                        constraints.maxHeight,
-                                                    left: 0,
-                                                    right: 0,
-                                                    child: Container(
-                                                      height: 3,
-                                                      decoration: BoxDecoration(
-                                                        color: _isLocking
-                                                            ? Colors.green
-                                                            : AppColors.primary,
-                                                        boxShadow: [
-                                                          BoxShadow(
-                                                              color: _isLocking
-                                                                  ? Colors
-                                                                      .greenAccent
-                                                                  : AppColors
-                                                                      .primaryLight,
-                                                              blurRadius: 10,
-                                                              spreadRadius: 3)
-                                                        ],
-                                                      ),
-                                                    ),
-                                                  );
-                                                },
-                                              ),
+                                              if (_isAutoMode)
+                                                AnimatedBuilder(
+                                                  animation: _laserAnimation,
+                                                  builder: (context, child) {
+                                                    return Positioned(
+                                                        top: _laserAnimation
+                                                                .value *
+                                                            constraints
+                                                                .maxHeight,
+                                                        left: 0,
+                                                        right: 0,
+                                                        child: Container(
+                                                            height: 3,
+                                                            decoration: BoxDecoration(
+                                                                color: _isLocking
+                                                                    ? Colors.green
+                                                                    : colors.primary,
+                                                                boxShadow: [
+                                                                  BoxShadow(
+                                                                      color: colors
+                                                                          .primaryLight,
+                                                                      blurRadius:
+                                                                          10,
+                                                                      spreadRadius:
+                                                                          3)
+                                                                ])));
+                                                  },
+                                                ),
                                             ],
                                           );
                                         },
@@ -1391,580 +1680,761 @@ class _ScannerScreenState extends State<ScannerScreen>
                   if (isResultView) ...[
                     if (_isAnalyzing) ...[
                       const SizedBox(height: 60),
-                      const Center(
-                          child: CircularProgressIndicator(
-                              color: AppColors.primary)),
+                      Center(
+                          child:
+                              CircularProgressIndicator(color: colors.primary)),
                       const SizedBox(height: 20),
-                      const Center(
-                          child: Text('Extracting text via Google ML Kit...',
+                      Center(
+                          child: Text(loc.loc('extracting_text'),
                               style: TextStyle(
-                                  color: AppColors.primaryDark,
+                                  color: colors.primaryDark,
                                   fontWeight: FontWeight.bold))),
                       const SizedBox(height: 100),
                     ] else ...[
-                      GestureDetector(
-                        onTap: _showEditNameModal,
-                        child: Row(
-                          children: [
-                            Expanded(
-                                child: Text(_productName,
-                                    style: const TextStyle(
-                                        fontSize: 32,
-                                        fontWeight: FontWeight.w900,
-                                        color: AppColors.primaryDark,
-                                        decoration: TextDecoration.underline,
-                                        decorationColor:
-                                            AppColors.primaryDark))),
-                            const Icon(Icons.edit_outlined,
-                                color: AppColors.primaryDark, size: 22),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      if (_exceedsDailyCap)
+                      if (_isInvalidSachet)
                         Container(
-                            width: double.infinity,
-                            margin: const EdgeInsets.only(bottom: 15),
-                            padding: const EdgeInsets.all(15),
-                            decoration: BoxDecoration(
-                                color: Colors.red.withOpacity(0.1),
-                                border: Border.all(
-                                    color: Colors.red.shade200, width: 2),
-                                borderRadius: BorderRadius.circular(15)),
-                            child: const Row(
-                              children: [
-                                Icon(Icons.warning_amber_rounded,
-                                    color: Colors.red, size: 28),
-                                SizedBox(width: 10),
-                                Expanded(
-                                    child: Text(
-                                  "DAILY LIMIT EXCEEDED. Consuming this item breaches your safe acid threshold.",
-                                  style: TextStyle(
-                                      color: Colors.red,
-                                      fontWeight: FontWeight.bold,
-                                      height: 1.4),
-                                ))
-                              ],
-                            )),
-                      if (_symptoms != "None") ...[
-                        Container(
-                          padding: const EdgeInsets.all(15),
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(25),
                           decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(25),
-                              boxShadow: [
-                                BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 10)
-                              ]),
-                          child: Row(
+                              color: colors.isDark
+                                  ? Colors.red.shade900.withOpacity(0.3)
+                                  : Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                  color: colors.isDark
+                                      ? Colors.red.shade900
+                                      : Colors.red.shade200)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              const Icon(Icons.local_fire_department,
-                                  color: Colors.orange, size: 36),
-                              const SizedBox(width: 15),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text('Logged Symptom',
-                                        style: TextStyle(
-                                            fontWeight: FontWeight.w900,
-                                            fontSize: 14,
-                                            color: AppColors.textDark)),
-                                    Text(_symptoms,
-                                        style: const TextStyle(
-                                            fontSize: 12,
-                                            color: AppColors.textGrey)),
-                                  ],
-                                ),
-                              ),
-                              Text('Severity: $_symptomSeverity',
-                                  style: const TextStyle(
+                              const Icon(Icons.warning_amber_rounded,
+                                  color: Colors.red, size: 50),
+                              const SizedBox(height: 15),
+                              Text("INVALID SACHET",
+                                  style: TextStyle(
+                                      fontSize: 22,
                                       fontWeight: FontWeight.w900,
-                                      color: AppColors.textDark,
-                                      fontSize: 14)),
+                                      color: colors.isDark
+                                          ? Colors.red.shade200
+                                          : Colors.red.shade900)),
+                              const SizedBox(height: 10),
+                              Text(_invalidSachetMessage,
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      color: colors.textDark,
+                                      height: 1.4,
+                                      fontWeight: FontWeight.bold)),
                             ],
                           ),
-                        ),
-                        const SizedBox(height: 15),
-                      ] else ...[
-                        Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(_getRiskLevelText(),
-                                style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w900,
-                                    color: _getRiskColor()))),
-                        Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                                'Score: ${_finalRiskScore.toStringAsFixed(1)}',
-                                style: const TextStyle(
-                                    fontSize: 36,
-                                    fontWeight: FontWeight.w900,
-                                    color: AppColors.textDark))),
-                        const Text(
-                            'Calculated based on your current personal sensitivity phase and the product\'s base acid load.',
-                            style: TextStyle(
-                                fontSize: 11,
-                                color: AppColors.textGrey,
-                                height: 1.5)),
-                        const SizedBox(height: 20),
-                      ],
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                            gradient: AppColors.primaryGradient,
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: [
-                              BoxShadow(
-                                  color: AppColors.primary.withOpacity(0.3),
-                                  blurRadius: 15,
-                                  offset: const Offset(0, 5))
-                            ]),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                const Text('Detected Risk',
+                        )
+                      else ...[
+                        GestureDetector(
+                          onTap: _showEditNameModal,
+                          child: Row(children: [
+                            Expanded(
+                                child: Text(
+                                    _productName == 'unnamed'
+                                        ? loc.loc('unnamed')
+                                        : _productName,
                                     style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w900)),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 15, vertical: 5),
-                                  decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(10)),
-                                  child: const Column(
-                                    children: [
-                                      Text('1',
-                                          style: TextStyle(
-                                              color: AppColors.primaryDark,
+                                        fontSize: 32,
+                                        fontWeight: FontWeight.w900,
+                                        color: colors.primaryDark,
+                                        decoration: TextDecoration.underline,
+                                        decorationColor: colors.primaryDark))),
+                            Icon(Icons.edit_outlined,
+                                color: colors.primaryDark, size: 22)
+                          ]),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                            "${loc.loc('category_label')} ${loc.loc(_drinkCategory.toLowerCase().replaceAll(' ', '_'))}",
+                            style: TextStyle(
+                                color: colors.primary,
+                                fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 10),
+                        Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                                color: colors.cardColor,
+                                borderRadius: BorderRadius.circular(20),
+                                boxShadow: [
+                                  BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 5))
+                                ]),
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                    loc.loc(
+                                                        'acid_impact_verdict'),
+                                                    style: TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w900,
+                                                        fontSize: 16,
+                                                        color: colors
+                                                            .primaryDark)),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              GestureDetector(
+                                                onTap: () => _showInfoModal(
+                                                    loc.loc(
+                                                        'acid_impact_verdict'),
+                                                    "The overall calculated risk level based on your personal biology and the drink's acidic compounds.",
+                                                    colors),
+                                                child: Icon(Icons.info_outline,
+                                                    color: colors.textGrey,
+                                                    size: 16),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 10, vertical: 5),
+                                            decoration: BoxDecoration(
+                                                color: _getRiskColor(colors)
+                                                    .withOpacity(0.1),
+                                                borderRadius:
+                                                    BorderRadius.circular(10)),
+                                            child: Text(_getRiskLevelText(loc),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                    color:
+                                                        _getRiskColor(colors),
+                                                    fontWeight: FontWeight.w900,
+                                                    fontSize: 10)))
+                                      ]),
+                                  const SizedBox(height: 15),
+                                  Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        Text(_finalRiskScore.toStringAsFixed(1),
+                                            style: TextStyle(
+                                                fontSize: 42,
+                                                fontWeight: FontWeight.w900,
+                                                color: colors.textDark)),
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                              bottom: 8, left: 8),
+                                          child: Text(loc.loc('acid_points'),
+                                              style: TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w900,
+                                                  color: colors.textGrey)),
+                                        )
+                                      ]),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                      RiskTranslator
+                                          .getHumanizedScoreDescription(
+                                              _finalRiskScore, loc),
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          height: 1.4,
+                                          color: colors.textGrey,
+                                          fontStyle: FontStyle.italic)),
+                                  Divider(
+                                      height: 30,
+                                      color: colors.isDark
+                                          ? Colors.white12
+                                          : Colors.grey.shade200),
+                                  Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                    loc.loc('dashboard_impact'),
+                                                    style: TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w900,
+                                                        fontSize: 14,
+                                                        color:
+                                                            colors.textDark)),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              GestureDetector(
+                                                onTap: () => _showInfoModal(
+                                                    loc.loc('dashboard_impact'),
+                                                    "How much of your daily safe acid limit this specific drink consumes.",
+                                                    colors),
+                                                child: Icon(Icons.info_outline,
+                                                    color: colors.textGrey,
+                                                    size: 16),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Text(
+                                            loc.loc('percent_daily_cap', {
+                                              'percent': impactPercentage
+                                                  .toStringAsFixed(0)
+                                            }),
+                                            style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 12,
+                                                color: colors.primary))
+                                      ]),
+                                  const SizedBox(height: 10),
+                                  ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: LinearProgressIndicator(
+                                        value:
+                                            _finalRiskScore / _activeDailyCap,
+                                        minHeight: 8,
+                                        backgroundColor: colors.isDark
+                                            ? Colors.white12
+                                            : Colors.grey.shade200,
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                                _getRiskColor(colors)),
+                                      )),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                      RiskTranslator.getDashboardImpactText(
+                                          _finalRiskScore, _userProfile, loc),
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: colors.textDark,
+                                          fontWeight: FontWeight.w500)),
+                                ])),
+                        const SizedBox(height: 15),
+                        if (impactPercentage > 60)
+                          Container(
+                              width: double.infinity,
+                              margin: const EdgeInsets.only(bottom: 15),
+                              padding: const EdgeInsets.all(15),
+                              decoration: BoxDecoration(
+                                  color: colors.isDark
+                                      ? Colors.amber.shade900.withOpacity(0.3)
+                                      : Colors.amber.shade50,
+                                  borderRadius: BorderRadius.circular(15),
+                                  border: Border.all(
+                                      color: colors.isDark
+                                          ? Colors.amber.shade900
+                                          : Colors.amber.shade200)),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.medication_liquid,
+                                      color: colors.isDark
+                                          ? Colors.amber.shade200
+                                          : Colors.orange),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                        RiskTranslator.getSmartRecommendation(
+                                            _drinkCategory,
+                                            _finalRiskScore,
+                                            _activeDailyCap,
+                                            loc),
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: colors.isDark
+                                                ? Colors.amber.shade100
+                                                : Colors.orange.shade900)),
+                                  )
+                                ],
+                              )),
+                        Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(20),
+                            decoration: BoxDecoration(
+                                color: colors.primary,
+                                borderRadius: BorderRadius.circular(20),
+                                boxShadow: [
+                                  BoxShadow(
+                                      color: colors.primary.withOpacity(0.3),
+                                      blurRadius: 15,
+                                      offset: const Offset(0, 5))
+                                ]),
+                            child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(children: [
+                                    const Icon(Icons.biotech,
+                                        color: Colors.white, size: 20),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                          loc.loc(
+                                              'potential_clinical_irritants'),
+                                          style: const TextStyle(
+                                              color: Colors.white,
                                               fontSize: 16,
                                               fontWeight: FontWeight.w900)),
-                                      Text('Consumed',
-                                          style: TextStyle(
-                                              color: AppColors.textDark,
-                                              fontSize: 8,
-                                              fontWeight: FontWeight.bold)),
-                                    ],
-                                  ),
-                                )
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            Text(_detectedTriggersText,
-                                style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 11,
-                                    height: 1.4)),
-                            const SizedBox(height: 10),
-                            const Text('Extracted OCR Text',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold)),
-                            Text(_rawText,
-                                style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 11,
-                                    height: 1.4)),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        children: [
-                          if (_symptoms == "None") ...[
-                            Expanded(
-                              child: InkWell(
-                                onTap: _showSymptomsModal,
-                                child: Container(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 15),
-                                  decoration: BoxDecoration(
+                                    ),
+                                    GestureDetector(
+                                      onTap: () => _showInfoModal(
+                                          loc.loc(
+                                              'potential_clinical_irritants'),
+                                          "Chemical triggers isolated from the ingredients label that may cause reflux synergy.",
+                                          colors),
+                                      child: const Icon(Icons.info_outline,
+                                          color: Colors.white70, size: 16),
+                                    ),
+                                  ]),
+                                  const SizedBox(height: 15),
+                                  _buildScannerClinicalUI(
+                                      _detectedTriggersText, colors),
+                                ])),
+                      ],
+                      const SizedBox(height: 15),
+                      Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E1E1E),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(children: [
+                                  const Icon(Icons.terminal,
+                                      color: Colors.greenAccent, size: 16),
+                                  const SizedBox(width: 8),
+                                  Text(loc.loc('raw_ocr_data'),
+                                      style: const TextStyle(
+                                          color: Colors.greenAccent,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w900)),
+                                ]),
+                                const SizedBox(height: 5),
+                                Text(loc.loc('tap_to_edit_ocr'),
+                                    style: const TextStyle(
+                                        color: Colors.white54,
+                                        fontSize: 9,
+                                        fontStyle: FontStyle.italic)),
+                                const SizedBox(height: 15),
+                                TextField(
+                                  controller: _ocrTextController,
+                                  maxLines: null,
+                                  style: const TextStyle(
                                       color: Colors.white,
-                                      borderRadius: BorderRadius.circular(15),
-                                      boxShadow: [
-                                        BoxShadow(
-                                            color:
-                                                Colors.black.withOpacity(0.05),
-                                            blurRadius: 10,
-                                            offset: const Offset(0, 5))
-                                      ]),
-                                  child: const Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.local_fire_department,
-                                          color: Colors.orange, size: 18),
-                                      SizedBox(width: 8),
-                                      Text('Log Symptom',
-                                          style: TextStyle(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w900,
-                                              color: AppColors.textDark)),
-                                    ],
+                                      fontSize: 11,
+                                      height: 1.5,
+                                      fontFamily: 'monospace'),
+                                  decoration: InputDecoration(
+                                    filled: true,
+                                    fillColor: Colors.black26,
+                                    border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                        borderSide: BorderSide.none),
+                                    focusedBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                        borderSide: const BorderSide(
+                                            color: Colors.greenAccent)),
                                   ),
                                 ),
-                              ),
-                            ),
-                            const SizedBox(width: 15),
-                          ],
-                          Expanded(
-                            child: InkWell(
-                              onTap: () => Navigator.push(
+                                const SizedBox(height: 15),
+                                SizedBox(
+                                  width: double.infinity,
+                                  height: 45,
+                                  child: ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor:
+                                          Colors.greenAccent.shade700,
+                                      foregroundColor: Colors.white,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                    ),
+                                    icon: _isRecalibrating
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                                color: Colors.white,
+                                                strokeWidth: 2))
+                                        : const Icon(Icons.sync, size: 18),
+                                    label: Text(
+                                      _isRecalibrating
+                                          ? loc.loc('recalibrating')
+                                          : loc.loc('recalibrate_analysis'),
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13),
+                                    ),
+                                    onPressed: _isRecalibrating
+                                        ? null
+                                        : () async {
+                                            setState(
+                                                () => _isRecalibrating = true);
+                                            FocusScope.of(context).unfocus();
+
+                                            await Future.delayed(const Duration(
+                                                milliseconds: 400));
+
+                                            await _processExtractedText(
+                                                _ocrTextController.text,
+                                                _productName);
+
+                                            setState(
+                                                () => _isRecalibrating = false);
+
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(context)
+                                                  .showSnackBar(SnackBar(
+                                                content: Text(
+                                                    loc.loc(
+                                                        'analysis_recalibrated'),
+                                                    style: const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.bold)),
+                                                backgroundColor: Colors.green,
+                                                behavior:
+                                                    SnackBarBehavior.floating,
+                                                duration:
+                                                    const Duration(seconds: 2),
+                                              ));
+                                            }
+                                          },
+                                  ),
+                                ),
+                              ])),
+                      const SizedBox(height: 20),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 55,
+                        child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                                foregroundColor: colors.primaryDark,
+                                side: BorderSide(
+                                    color: colors.primaryLight, width: 2),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20))),
+                            icon: const Icon(Icons.medical_services_outlined),
+                            label: Text(loc.loc('first_aid_coach'),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w900, fontSize: 16)),
+                            onPressed: () {
+                              Navigator.push(
                                   context,
                                   MaterialPageRoute(
                                       builder: (context) => CoachScreen(
-                                            dbService: widget.dbService,
-                                            entryMode: 'scanner',
-                                            activeSymptom: _symptoms != "None"
-                                                ? _symptoms
-                                                : null,
-                                            symptomSeverity: _symptomSeverity,
-                                            scannedProduct: _productName,
-                                            dynamicContextData:
-                                                _detectedTriggersText,
-                                          ))),
-                              child: Container(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 15),
-                                decoration: BoxDecoration(
-                                    color: AppColors.primaryLight
-                                        .withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(15),
-                                    border: Border.all(
-                                        color: AppColors.primaryLight)),
-                                child: const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.medical_services_outlined,
-                                        color: AppColors.primaryDark, size: 18),
-                                    SizedBox(width: 8),
-                                    Text('First Aid Coach',
-                                        style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w900,
-                                            color: AppColors.primaryDark)),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                                          dbService: widget.dbService,
+                                          entryMode: 'scanner',
+                                          scannedProduct: _productName,
+                                          dynamicContextData:
+                                              "User just scanned an item with risk level: \$_riskLevel.")));
+                            }),
                       ),
                       const SizedBox(height: 150),
                     ]
                   ] else ...[
-                    Container(
-                      width: double.infinity,
-                      height: 60,
-                      decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(30),
-                          boxShadow: [
-                            BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10,
-                                offset: const Offset(0, 5))
-                          ]),
-                      child: Row(
+                    if (!_isAutoMode)
+                      Column(
                         children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: _takePictureAndScan,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(30),
-                                    border: Border.all(
-                                        color: Colors.grey.shade200)),
-                                child: const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.camera_alt_outlined,
-                                        color: AppColors.textDark, size: 20),
-                                    SizedBox(width: 8),
-                                    Text('Manual Shutter',
-                                        style: TextStyle(
-                                            color: AppColors.textDark,
-                                            fontWeight: FontWeight.bold)),
-                                  ],
-                                ),
-                              ),
+                          Container(
+                            width: double.infinity,
+                            height: 60,
+                            decoration: BoxDecoration(
+                                color: colors.cardColor,
+                                borderRadius: BorderRadius.circular(30),
+                                boxShadow: [
+                                  BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 5))
+                                ]),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                    child: GestureDetector(
+                                        onTap: () =>
+                                            _takePictureAndScan(colors),
+                                        child: Container(
+                                            decoration: BoxDecoration(
+                                                color: colors.cardColor,
+                                                borderRadius:
+                                                    BorderRadius.circular(30),
+                                                border: Border.all(
+                                                    color: colors.isDark
+                                                        ? Colors.white12
+                                                        : Colors
+                                                            .grey.shade200)),
+                                            child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  Icon(Icons.camera_alt,
+                                                      color: colors.primary,
+                                                      size: 20),
+                                                  const SizedBox(width: 8),
+                                                  Text(
+                                                      loc.loc('manual_shutter'),
+                                                      style: TextStyle(
+                                                          color:
+                                                              colors.textDark,
+                                                          fontWeight:
+                                                              FontWeight.bold))
+                                                ])))),
+                                Expanded(
+                                    child: GestureDetector(
+                                        onTap: () => _pickFromGallery(colors),
+                                        child: Container(
+                                            decoration: BoxDecoration(
+                                                color: colors.primary,
+                                                borderRadius:
+                                                    const BorderRadius.only(
+                                                        topRight:
+                                                            Radius.circular(30),
+                                                        bottomRight:
+                                                            Radius.circular(
+                                                                30))),
+                                            child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  const Icon(
+                                                      Icons.image_outlined,
+                                                      color: Colors.white,
+                                                      size: 20),
+                                                  const SizedBox(width: 8),
+                                                  Text(loc.loc('gallery'),
+                                                      style: const TextStyle(
+                                                          color: Colors.white,
+                                                          fontWeight:
+                                                              FontWeight.bold))
+                                                ])))),
+                              ],
                             ),
                           ),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: _pickFromGallery,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                    gradient: LinearGradient(colors: [
-                                      AppColors.primaryLight.withOpacity(0.6),
-                                      AppColors.primary
-                                    ]),
-                                    borderRadius: const BorderRadius.only(
-                                        topRight: Radius.circular(30),
-                                        bottomRight: Radius.circular(30))),
-                                child: const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.image_outlined,
-                                        color: AppColors.textDark, size: 20),
-                                    SizedBox(width: 8),
-                                    Text('Gallery',
-                                        style: TextStyle(
-                                            color: AppColors.textDark,
-                                            fontWeight: FontWeight.bold)),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
+                          const SizedBox(height: 15),
+                          SizedBox(
+                              width: double.infinity,
+                              height: 50,
+                              child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                      backgroundColor: colors.cardColor,
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(15))),
+                                  onPressed: _showManualEntryModal,
+                                  child: Text(
+                                      loc.loc('type_ingredients_manually'),
+                                      style: TextStyle(
+                                          color: colors.textGrey,
+                                          fontWeight: FontWeight.w900,
+                                          fontSize: 16)))),
+                          const SizedBox(height: 15),
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 15),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 50,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(15))),
-                        onPressed: _showManualEntryModal,
-                        child: const Text('Type Ingredients Manually',
-                            style: TextStyle(
-                                color: Colors.grey,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 16)),
-                      ),
-                    ),
-                    const SizedBox(height: 15),
                     Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(15),
-                          boxShadow: [
-                            BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10)
-                          ]),
-                      child: const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                            color: colors.cardColor,
+                            borderRadius: BorderRadius.circular(15),
+                            boxShadow: [
+                              BoxShadow(
+                                  color: Colors.black.withOpacity(0.05),
+                                  blurRadius: 10)
+                            ]),
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.info_outline,
-                                  color: AppColors.textDark),
-                              SizedBox(width: 8),
-                              Text('How it works',
+                              Row(children: [
+                                Icon(Icons.info_outline,
+                                    color: colors.primaryDark),
+                                const SizedBox(width: 8),
+                                Text(loc.loc('how_it_works'),
+                                    style: TextStyle(
+                                        fontWeight: FontWeight.w900,
+                                        color: colors.textDark))
+                              ]),
+                              const SizedBox(height: 10),
+                              Text(loc.loc('how_it_works_desc'),
                                   style: TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      color: AppColors.textDark)),
-                            ],
-                          ),
-                          SizedBox(height: 10),
-                          Text(
-                              "Point the camera at a powdered drink sachet. The scanner will automatically detect the ingredients and isolate them for PRAL analysis. No need to press a button unless the scanner fails.",
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  color: AppColors.textGrey,
-                                  height: 1.5)),
-                        ],
-                      ),
-                    ),
+                                      fontSize: 11,
+                                      color: colors.textGrey,
+                                      height: 1.5))
+                            ])),
                     const SizedBox(height: 100),
                   ]
                 ],
               ),
             ),
           ),
-          if (!isResultView && _snarkyMessage.isNotEmpty)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black.withOpacity(0.85),
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 40.0),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Image.asset('assets/images/triggerlens_icon.png',
-                            width: 60, color: Colors.grey),
-                        const SizedBox(height: 30),
-                        Text(
-                          _snarkyMessage,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
-                            height: 1.4,
-                          ),
-                        ),
-                        const SizedBox(height: 40),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primary,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 40, vertical: 15),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(30)),
-                          ),
-                          onPressed: _startAutoScan,
-                          child: const Text('Scan Again',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold)),
-                        )
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
           Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: isResultView
-                ? _buildResultBottomBar()
-                : Container(
-                    height: 120,
-                    color: Colors.transparent,
-                    child: Stack(
-                      alignment: Alignment.bottomCenter,
-                      children: [
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: isResultView
+                  ? _buildResultBottomBar(colors, loc)
+                  : Container(
+                      height: 120,
+                      color: Colors.transparent,
+                      child:
+                          Stack(alignment: Alignment.bottomCenter, children: [
                         Container(
-                          margin: const EdgeInsets.only(
-                              left: 20, right: 20, bottom: 20),
-                          height: 65,
-                          decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(35),
-                              boxShadow: [
-                                BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 20,
-                                    offset: const Offset(0, 5))
-                              ]),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceAround,
-                            children: [
-                              IconButton(
-                                icon: Image.asset(
-                                  'assets/images/home.png',
-                                  width: 24,
-                                  color: AppColors.textDark,
-                                ),
-                                onPressed: () => Navigator.pushAndRemoveUntil(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => MainLayoutScreen(
-                                      dbService: widget.dbService,
-                                      initialIndex: 0,
-                                    ),
-                                  ),
-                                  (route) => false,
-                                ),
-                              ),
-                              IconButton(
-                                icon: Image.asset(
-                                  'assets/images/write.png',
-                                  width: 24,
-                                  color: AppColors.textDark,
-                                ),
-                                onPressed: () => Navigator.pushAndRemoveUntil(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => MainLayoutScreen(
-                                      dbService: widget.dbService,
-                                      initialIndex: 1,
-                                    ),
-                                  ),
-                                  (route) => false,
-                                ),
-                              ),
-                              const SizedBox(width: 60),
-                              IconButton(
-                                icon: Image.asset(
-                                  'assets/images/bar-graph.png',
-                                  width: 24,
-                                  color: AppColors.textDark,
-                                ),
-                                onPressed: () => Navigator.pushAndRemoveUntil(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => MainLayoutScreen(
-                                      dbService: widget.dbService,
-                                      initialIndex: 2,
-                                    ),
-                                  ),
-                                  (route) => false,
-                                ),
-                              ),
-                              IconButton(
-                                icon: Image.asset(
-                                  'assets/images/message.png',
-                                  width: 24,
-                                  color: AppColors.textDark,
-                                ),
-                                onPressed: () => Navigator.pushAndRemoveUntil(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => MainLayoutScreen(
-                                      dbService: widget.dbService,
-                                      initialIndex: 3,
-                                    ),
-                                  ),
-                                  (route) => false,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                            margin: const EdgeInsets.only(
+                                left: 20, right: 20, bottom: 20),
+                            height: 65,
+                            decoration: BoxDecoration(
+                                color: colors.cardColor,
+                                borderRadius: BorderRadius.circular(35),
+                                boxShadow: [
+                                  BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 20,
+                                      offset: const Offset(0, 5))
+                                ]),
+                            child: Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceAround,
+                                children: [
+                                  IconButton(
+                                      icon: Image.asset(
+                                          'assets/images/home.png',
+                                          width: 24,
+                                          color: colors.textDark),
+                                      onPressed: () =>
+                                          Navigator.pushAndRemoveUntil(
+                                              context,
+                                              MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      MainLayoutScreen(
+                                                          dbService:
+                                                              widget.dbService,
+                                                          initialIndex: 0)),
+                                              (route) => false)),
+                                  IconButton(
+                                      icon: Image.asset(
+                                          'assets/images/write.png',
+                                          width: 24,
+                                          color: colors.textDark),
+                                      onPressed: () =>
+                                          Navigator.pushAndRemoveUntil(
+                                              context,
+                                              MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      MainLayoutScreen(
+                                                          dbService:
+                                                              widget.dbService,
+                                                          initialIndex: 1)),
+                                              (route) => false)),
+                                  const SizedBox(width: 60),
+                                  IconButton(
+                                      icon: Image.asset(
+                                          'assets/images/bar-graph.png',
+                                          width: 24,
+                                          color: colors.textDark),
+                                      onPressed: () =>
+                                          Navigator.pushAndRemoveUntil(
+                                              context,
+                                              MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      MainLayoutScreen(
+                                                          dbService:
+                                                              widget.dbService,
+                                                          initialIndex: 2)),
+                                              (route) => false)),
+                                  IconButton(
+                                      icon: Image.asset(
+                                          'assets/images/message.png',
+                                          width: 24,
+                                          color: colors.textDark),
+                                      onPressed: () =>
+                                          Navigator.pushAndRemoveUntil(
+                                              context,
+                                              MaterialPageRoute(
+                                                  builder: (context) =>
+                                                      MainLayoutScreen(
+                                                          dbService:
+                                                              widget.dbService,
+                                                          initialIndex: 3)),
+                                              (route) => false))
+                                ])),
                         Positioned(
-                          bottom: 35,
-                          child: GestureDetector(
-                            onTap: _takePictureAndScan,
-                            child: Container(
-                              width: 75,
-                              height: 75,
-                              decoration: BoxDecoration(
-                                  gradient: AppColors.primaryGradient,
-                                  borderRadius: BorderRadius.circular(25),
-                                  boxShadow: [
-                                    BoxShadow(
-                                        color:
-                                            AppColors.primary.withOpacity(0.4),
-                                        blurRadius: 20,
-                                        offset: const Offset(0, 8))
-                                  ]),
-                              child: Center(
-                                child: Image.asset(
-                                    'assets/images/barcode-scanner.png',
-                                    width: 40,
-                                    color: Colors.white),
-                              ),
-                            ),
-                          ),
-                        )
-                      ],
-                    ),
-                  ),
-          )
+                            bottom: 35,
+                            child: GestureDetector(
+                                onTap: () {
+                                  if (_isAutoMode) {
+                                    setState(() => _isAutoMode = false);
+                                    _stopAutoScanEngine();
+                                  }
+                                  _takePictureAndScan(colors);
+                                },
+                                child: Container(
+                                    width: 70,
+                                    height: 70,
+                                    decoration: BoxDecoration(
+                                        color: colors.primaryDark,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                              color: colors.primary
+                                                  .withOpacity(0.4),
+                                              blurRadius: 20,
+                                              offset: const Offset(0, 8))
+                                        ]),
+                                    child: Center(
+                                        child: Image.asset(
+                                            'assets/images/barcode-scanner.png',
+                                            width: 32,
+                                            color: Colors.white)))))
+                      ])))
         ],
       ),
     );
   }
+}
+
+class _TextBoundingBoxPainter extends CustomPainter {
+  final List<TextBlock> textBlocks;
+  final Size imageSize;
+
+  _TextBoundingBoxPainter(this.textBlocks, this.imageSize);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final double scaleX = size.width / imageSize.height;
+    final double scaleY = size.height / imageSize.width;
+
+    final Paint defaultPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0
+      ..color = Colors.white.withOpacity(0.5);
+
+    final Paint matchPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.0
+      ..color = Colors.greenAccent;
+
+    for (var block in textBlocks) {
+      final rect = Rect.fromLTRB(
+        block.boundingBox.left * scaleX,
+        block.boundingBox.top * scaleY,
+        block.boundingBox.right * scaleX,
+        block.boundingBox.bottom * scaleY,
+      );
+
+      bool isSemanticTarget = KeywordMappingAlgorithm.semanticKeywords
+          .any((kw) => block.text.toLowerCase().contains(kw));
+
+      canvas.drawRect(rect, isSemanticTarget ? matchPaint : defaultPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

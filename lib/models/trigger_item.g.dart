@@ -17,18 +17,33 @@ const TriggerItemSchema = CollectionSchema(
   name: r'TriggerItem',
   id: -96418144320294618,
   properties: {
-    r'category': PropertySchema(
+    r'basePralScore': PropertySchema(
       id: 0,
+      name: r'basePralScore',
+      type: IsarType.double,
+    ),
+    r'category': PropertySchema(
+      id: 1,
       name: r'category',
       type: IsarType.string,
     ),
+    r'clinicalDescription': PropertySchema(
+      id: 2,
+      name: r'clinicalDescription',
+      type: IsarType.string,
+    ),
+    r'interactionFamily': PropertySchema(
+      id: 3,
+      name: r'interactionFamily',
+      type: IsarType.string,
+    ),
     r'name': PropertySchema(
-      id: 1,
+      id: 4,
       name: r'name',
       type: IsarType.string,
     ),
     r'riskLevel': PropertySchema(
-      id: 2,
+      id: 5,
       name: r'riskLevel',
       type: IsarType.string,
     )
@@ -68,6 +83,8 @@ int _triggerItemEstimateSize(
 ) {
   var bytesCount = offsets.last;
   bytesCount += 3 + object.category.length * 3;
+  bytesCount += 3 + object.clinicalDescription.length * 3;
+  bytesCount += 3 + object.interactionFamily.length * 3;
   bytesCount += 3 + object.name.length * 3;
   bytesCount += 3 + object.riskLevel.length * 3;
   return bytesCount;
@@ -79,9 +96,12 @@ void _triggerItemSerialize(
   List<int> offsets,
   Map<Type, List<int>> allOffsets,
 ) {
-  writer.writeString(offsets[0], object.category);
-  writer.writeString(offsets[1], object.name);
-  writer.writeString(offsets[2], object.riskLevel);
+  writer.writeDouble(offsets[0], object.basePralScore);
+  writer.writeString(offsets[1], object.category);
+  writer.writeString(offsets[2], object.clinicalDescription);
+  writer.writeString(offsets[3], object.interactionFamily);
+  writer.writeString(offsets[4], object.name);
+  writer.writeString(offsets[5], object.riskLevel);
 }
 
 TriggerItem _triggerItemDeserialize(
@@ -91,10 +111,13 @@ TriggerItem _triggerItemDeserialize(
   Map<Type, List<int>> allOffsets,
 ) {
   final object = TriggerItem();
-  object.category = reader.readString(offsets[0]);
+  object.basePralScore = reader.readDouble(offsets[0]);
+  object.category = reader.readString(offsets[1]);
+  object.clinicalDescription = reader.readString(offsets[2]);
   object.id = id;
-  object.name = reader.readString(offsets[1]);
-  object.riskLevel = reader.readString(offsets[2]);
+  object.interactionFamily = reader.readString(offsets[3]);
+  object.name = reader.readString(offsets[4]);
+  object.riskLevel = reader.readString(offsets[5]);
   return object;
 }
 
@@ -106,10 +129,16 @@ P _triggerItemDeserializeProp<P>(
 ) {
   switch (propertyId) {
     case 0:
-      return (reader.readString(offset)) as P;
+      return (reader.readDouble(offset)) as P;
     case 1:
       return (reader.readString(offset)) as P;
     case 2:
+      return (reader.readString(offset)) as P;
+    case 3:
+      return (reader.readString(offset)) as P;
+    case 4:
+      return (reader.readString(offset)) as P;
+    case 5:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -309,6 +338,72 @@ extension TriggerItemQueryWhere
 
 extension TriggerItemQueryFilter
     on QueryBuilder<TriggerItem, TriggerItem, QFilterCondition> {
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      basePralScoreEqualTo(
+    double value, {
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'basePralScore',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      basePralScoreGreaterThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'basePralScore',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      basePralScoreLessThan(
+    double value, {
+    bool include = false,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'basePralScore',
+        value: value,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      basePralScoreBetween(
+    double lower,
+    double upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    double epsilon = Query.epsilon,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'basePralScore',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        epsilon: epsilon,
+      ));
+    });
+  }
+
   QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition> categoryEqualTo(
     String value, {
     bool caseSensitive = true,
@@ -444,6 +539,142 @@ extension TriggerItemQueryFilter
     });
   }
 
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      clinicalDescriptionEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'clinicalDescription',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      clinicalDescriptionGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'clinicalDescription',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      clinicalDescriptionLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'clinicalDescription',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      clinicalDescriptionBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'clinicalDescription',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      clinicalDescriptionStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'clinicalDescription',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      clinicalDescriptionEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'clinicalDescription',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      clinicalDescriptionContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'clinicalDescription',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      clinicalDescriptionMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'clinicalDescription',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      clinicalDescriptionIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'clinicalDescription',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      clinicalDescriptionIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'clinicalDescription',
+        value: '',
+      ));
+    });
+  }
+
   QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition> idEqualTo(
       Id value) {
     return QueryBuilder.apply(this, (query) {
@@ -493,6 +724,142 @@ extension TriggerItemQueryFilter
         includeLower: includeLower,
         upper: upper,
         includeUpper: includeUpper,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      interactionFamilyEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'interactionFamily',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      interactionFamilyGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'interactionFamily',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      interactionFamilyLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'interactionFamily',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      interactionFamilyBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'interactionFamily',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      interactionFamilyStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'interactionFamily',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      interactionFamilyEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'interactionFamily',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      interactionFamilyContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'interactionFamily',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      interactionFamilyMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'interactionFamily',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      interactionFamilyIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'interactionFamily',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterFilterCondition>
+      interactionFamilyIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'interactionFamily',
+        value: '',
       ));
     });
   }
@@ -773,6 +1140,19 @@ extension TriggerItemQueryLinks
 
 extension TriggerItemQuerySortBy
     on QueryBuilder<TriggerItem, TriggerItem, QSortBy> {
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy> sortByBasePralScore() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'basePralScore', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy>
+      sortByBasePralScoreDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'basePralScore', Sort.desc);
+    });
+  }
+
   QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy> sortByCategory() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'category', Sort.asc);
@@ -782,6 +1162,34 @@ extension TriggerItemQuerySortBy
   QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy> sortByCategoryDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'category', Sort.desc);
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy>
+      sortByClinicalDescription() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'clinicalDescription', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy>
+      sortByClinicalDescriptionDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'clinicalDescription', Sort.desc);
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy>
+      sortByInteractionFamily() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'interactionFamily', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy>
+      sortByInteractionFamilyDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'interactionFamily', Sort.desc);
     });
   }
 
@@ -812,6 +1220,19 @@ extension TriggerItemQuerySortBy
 
 extension TriggerItemQuerySortThenBy
     on QueryBuilder<TriggerItem, TriggerItem, QSortThenBy> {
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy> thenByBasePralScore() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'basePralScore', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy>
+      thenByBasePralScoreDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'basePralScore', Sort.desc);
+    });
+  }
+
   QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy> thenByCategory() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'category', Sort.asc);
@@ -824,6 +1245,20 @@ extension TriggerItemQuerySortThenBy
     });
   }
 
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy>
+      thenByClinicalDescription() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'clinicalDescription', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy>
+      thenByClinicalDescriptionDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'clinicalDescription', Sort.desc);
+    });
+  }
+
   QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy> thenById() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'id', Sort.asc);
@@ -833,6 +1268,20 @@ extension TriggerItemQuerySortThenBy
   QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy> thenByIdDesc() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'id', Sort.desc);
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy>
+      thenByInteractionFamily() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'interactionFamily', Sort.asc);
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QAfterSortBy>
+      thenByInteractionFamilyDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'interactionFamily', Sort.desc);
     });
   }
 
@@ -863,10 +1312,32 @@ extension TriggerItemQuerySortThenBy
 
 extension TriggerItemQueryWhereDistinct
     on QueryBuilder<TriggerItem, TriggerItem, QDistinct> {
+  QueryBuilder<TriggerItem, TriggerItem, QDistinct> distinctByBasePralScore() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'basePralScore');
+    });
+  }
+
   QueryBuilder<TriggerItem, TriggerItem, QDistinct> distinctByCategory(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
       return query.addDistinctBy(r'category', caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QDistinct>
+      distinctByClinicalDescription({bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'clinicalDescription',
+          caseSensitive: caseSensitive);
+    });
+  }
+
+  QueryBuilder<TriggerItem, TriggerItem, QDistinct> distinctByInteractionFamily(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'interactionFamily',
+          caseSensitive: caseSensitive);
     });
   }
 
@@ -893,9 +1364,29 @@ extension TriggerItemQueryProperty
     });
   }
 
+  QueryBuilder<TriggerItem, double, QQueryOperations> basePralScoreProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'basePralScore');
+    });
+  }
+
   QueryBuilder<TriggerItem, String, QQueryOperations> categoryProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'category');
+    });
+  }
+
+  QueryBuilder<TriggerItem, String, QQueryOperations>
+      clinicalDescriptionProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'clinicalDescription');
+    });
+  }
+
+  QueryBuilder<TriggerItem, String, QQueryOperations>
+      interactionFamilyProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'interactionFamily');
     });
   }
 

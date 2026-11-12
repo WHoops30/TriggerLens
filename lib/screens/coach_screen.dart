@@ -1,14 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'dart:io';
+import 'package:google_generative_ai/google_generative_ai.dart';
+import 'dart:async';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 import '../services/database_service.dart';
 import '../models/user_profile.dart';
 import '../utils/ui_helpers.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
-import 'dart:async';
+import '../utils/app_localizations.dart';
+import '../main.dart';
 
 class ChatMessage {
   final String text;
@@ -39,6 +45,10 @@ class CoachScreen extends StatefulWidget {
   final String? scannedProduct;
   final String? dynamicContextData;
 
+  final String? drinkCategory;
+  final String? portionMeasurement;
+  final double? portionCount;
+
   const CoachScreen({
     super.key,
     required this.dbService,
@@ -47,6 +57,9 @@ class CoachScreen extends StatefulWidget {
     this.symptomSeverity,
     this.scannedProduct,
     this.dynamicContextData,
+    this.drinkCategory,
+    this.portionMeasurement,
+    this.portionCount,
   });
 
   @override
@@ -56,6 +69,7 @@ class CoachScreen extends StatefulWidget {
 class _CoachScreenState extends State<CoachScreen> {
   final TextEditingController _chatController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final FocusNode _chatFocusNode = FocusNode();
 
   List<ChatMessage> _messages = [];
   bool _isLoading = false;
@@ -64,13 +78,21 @@ class _CoachScreenState extends State<CoachScreen> {
   User? _currentUser;
   UserProfile? _userProfile;
 
-  static const String _apiKey =
-      'AQ.Ab8RN6K5yjP8p15VJSFqHA0w16qzZwbJVes-K0uWVuWlKhfc1A';
+  String get _apiKey =>
+      dotenv.isInitialized ? (dotenv.env['GEMINI_API_KEY'] ?? '') : '';
 
   @override
   void initState() {
     super.initState();
     _loadUserDataAndHistory();
+  }
+
+  @override
+  void dispose() {
+    _chatController.dispose();
+    _scrollController.dispose();
+    _chatFocusNode.dispose();
+    super.dispose();
   }
 
   Future<void> _loadUserDataAndHistory() async {
@@ -86,19 +108,17 @@ class _CoachScreenState extends State<CoachScreen> {
     await _loadLocalHistory();
   }
 
-  // ==========================================
-  // LOCAL 14-DAY ROLLING MEMORY
-  // ==========================================
   Future<File> get _localFile async {
     final directory = await getApplicationDocumentsDirectory();
-    return File('${directory.path}/tummy_buddy_history.json');
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'guest';
+    return File('${directory.path}/tummy_buddy_history_$uid.json');
   }
 
   Future<void> _loadLocalHistory() async {
     try {
       final file = await _localFile;
       if (!await file.exists()) {
-        _generateOpeningGreeting();
+        await _generateOpeningGreeting();
         return;
       }
 
@@ -108,7 +128,6 @@ class _CoachScreenState extends State<CoachScreen> {
       List<ChatMessage> validMessages = [];
       final now = DateTime.now();
 
-      // Filter out messages older than 14 days
       for (var item in jsonList) {
         final msg = ChatMessage.fromJson(item);
         if (now.difference(msg.timestamp).inDays <= 14) {
@@ -117,7 +136,7 @@ class _CoachScreenState extends State<CoachScreen> {
       }
 
       if (validMessages.isEmpty) {
-        _generateOpeningGreeting();
+        await _generateOpeningGreeting();
       } else {
         if (mounted) {
           setState(() {
@@ -128,11 +147,10 @@ class _CoachScreenState extends State<CoachScreen> {
         }
       }
 
-      // Save the cleaned-up list back to the file (purges old messages)
       await _saveLocalHistory();
     } catch (e) {
       debugPrint("Error loading local history: $e");
-      _generateOpeningGreeting();
+      await _generateOpeningGreeting();
     }
   }
 
@@ -146,17 +164,26 @@ class _CoachScreenState extends State<CoachScreen> {
     }
   }
 
-  void _generateOpeningGreeting() {
+  Future<void> _generateOpeningGreeting() async {
+    final prefs = await SharedPreferences.getInstance();
+    final langCode = prefs.getString('language_code') ?? 'en';
+
     String name = _getFirstName();
-    String initialMessage =
-        'Hi $name! I\'m Tummy Buddy ✨ How can I help you today?';
+    String initialMessage = LanguageDictionary.translate(
+        'greeting_general', langCode, {'name': name});
 
     if (widget.entryMode == 'scanner' && widget.activeSymptom != null) {
       initialMessage =
-          'Hi $name! I see you logged feeling ${widget.activeSymptom} after having ${widget.scannedProduct ?? "that product"}. I am so sorry! Do you need some gentle tips to feel better right now? 🩹';
+          LanguageDictionary.translate('greeting_scanner', langCode, {
+        'name': name,
+        'symptom': LanguageDictionary.translate(
+            'symp_${widget.activeSymptom!.toLowerCase().replaceAll(' ', '_')}',
+            langCode),
+        'product': widget.scannedProduct ?? "that product"
+      });
     } else if (widget.entryMode == 'insights') {
-      initialMessage =
-          'Hi $name! I was just looking at your recent insights. Let\'s figure out how we can keep your daily acid load under control! 📊';
+      initialMessage = LanguageDictionary.translate(
+          'greeting_insights', langCode, {'name': name});
     }
 
     if (mounted) {
@@ -170,28 +197,35 @@ class _CoachScreenState extends State<CoachScreen> {
   }
 
   Future<void> _wipeLocalHistory() async {
+    final colors = AppColors.of(context);
+    final loc = AppLocalizations.of(context);
+
     bool? confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: colors.cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Clear Chat?",
+        title: Text(loc.loc('clear_chat_q'),
             style: TextStyle(
-                fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red)),
-        content: const Text(
-            "This will permanently delete your conversation memory from this device."),
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: colors.errorRed)),
+        content: Text(loc.loc('clear_chat_desc'),
+            style: TextStyle(color: colors.textDark)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+            child: Text(loc.loc('cancel'),
+                style: const TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
+                backgroundColor: colors.errorRed,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10))),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Delete",
-                style: TextStyle(
+            child: Text(loc.loc('delete'),
+                style: const TextStyle(
                     color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
@@ -211,35 +245,46 @@ class _CoachScreenState extends State<CoachScreen> {
 
       setState(() {
         _messages.clear();
-        _generateOpeningGreeting();
+      });
+
+      await _generateOpeningGreeting();
+
+      setState(() {
         _isLoading = false;
       });
     }
   }
 
   Future<void> _deleteSingleMessage(int index) async {
+    final colors = AppColors.of(context);
+    final loc = AppLocalizations.of(context);
+
     bool? confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: colors.cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Delete Message?",
+        title: Text(loc.loc('delete_message_q'),
             style: TextStyle(
-                fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red)),
-        content: const Text(
-            "Are you sure you want to delete this specific message?"),
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: colors.errorRed)),
+        content: Text(loc.loc('delete_message_desc'),
+            style: TextStyle(color: colors.textDark)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text("Cancel", style: TextStyle(color: Colors.grey)),
+            child: Text(loc.loc('cancel'),
+                style: const TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
+                backgroundColor: colors.errorRed,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10))),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text("Delete",
-                style: TextStyle(
+            child: Text(loc.loc('delete'),
+                style: const TextStyle(
                     color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
@@ -255,14 +300,14 @@ class _CoachScreenState extends State<CoachScreen> {
   }
 
   String _getFirstName() {
+    String rawName = "Friend";
     if (_currentUser?.displayName != null &&
         _currentUser!.displayName!.trim().isNotEmpty) {
-      return _currentUser!.displayName!.split(' ').first;
+      rawName = _currentUser!.displayName!.split(' ').first;
+    } else if (_currentUser?.email != null && _currentUser!.email!.isNotEmpty) {
+      rawName = _currentUser!.email!.split('@').first;
     }
-    if (_currentUser?.email != null && _currentUser!.email!.isNotEmpty) {
-      return _currentUser!.email!.split('@').first;
-    }
-    return "Friend";
+    return rawName.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '');
   }
 
   bool _containsEmergencyKeywords(String text) {
@@ -274,7 +319,14 @@ class _CoachScreenState extends State<CoachScreen> {
       'can\'t breathe',
       'fainting',
       'hospital',
-      'emergency'
+      'emergency',
+      'dugo',
+      'dumudugo',
+      'sumasakit ang dibdib',
+      'atake sa puso',
+      'nahihirapang huminga',
+      'hinimatay',
+      'ospital'
     ];
     String lowerText = text.toLowerCase();
     for (String word in emergencies) {
@@ -283,9 +335,48 @@ class _CoachScreenState extends State<CoachScreen> {
     return false;
   }
 
-  Future<void> _sendMessage() async {
-    final text = _chatController.text.trim();
+  List<String> _getDynamicQuickReplies(AppLocalizations loc) {
+    bool isTagalog = loc.languageProvider.currentLanguage == 'tl';
+
+    if (_messages.isEmpty) {
+      return [
+        isTagalog ? 'Sumasakit ang tiyan ko' : 'My stomach hurts',
+        isTagalog ? 'Ano ang pwede kong inumin?' : 'What is safe to drink?',
+        isTagalog ? 'May heartburn ako' : 'I have heartburn',
+      ];
+    }
+
+    final lastMsg = _messages.last.text.toLowerCase();
+    if (lastMsg.contains('scale') ||
+        lastMsg.contains('rate') ||
+        lastMsg.contains('1 hanggang 10') ||
+        lastMsg.contains('severity')) {
+      return ['1', '3', '5', '8', '10'];
+    } else if (lastMsg.contains('yes or no') ||
+        lastMsg.contains('oo o hindi')) {
+      return [
+        isTagalog ? 'Oo' : 'Yes',
+        isTagalog ? 'Hindi' : 'No',
+      ];
+    }
+
+    return [
+      isTagalog ? 'Sumasakit ang tiyan ko' : 'My stomach hurts',
+      isTagalog ? 'Ano ang pwede kong inumin?' : 'What is safe to drink?',
+      isTagalog ? 'May heartburn ako' : 'I have heartburn',
+    ];
+  }
+
+  Future<void> _sendMessage([String? quickReplyText]) async {
+    final loc = AppLocalizations.of(context);
+    final text = quickReplyText ?? _chatController.text.trim();
     if (text.isEmpty) return;
+
+    if (_apiKey.isEmpty) {
+      _deliverBotResponse(
+          "⚠️ ERROR: Gemini API Key is missing.\n\n1. Ensure you have a '.env' file in your project root with your API key.\n\n2. Open your pubspec.yaml file and add the .env file to your assets like this:\n\nflutter:\n  assets:\n    - .env");
+      return;
+    }
 
     ChatMessage newUserMsg =
         ChatMessage(text: text, isUser: true, timestamp: DateTime.now());
@@ -302,14 +393,12 @@ class _CoachScreenState extends State<CoachScreen> {
     final List<ConnectivityResult> connectivityResult =
         await (Connectivity().checkConnectivity());
     if (connectivityResult.contains(ConnectivityResult.none)) {
-      _deliverBotResponse(
-          "Oops! I need Wi-Fi to think! Please connect to the internet so I can help you. 🫧");
+      _deliverBotResponse(loc.loc('error_no_internet'));
       return;
     }
 
     if (_containsEmergencyKeywords(text)) {
-      _deliverBotResponse(
-          "⚠️ This sounds like a medical emergency. I am not a doctor. Please stop using this app and seek immediate professional medical attention, go to the nearest hospital, or call emergency services right away.");
+      _deliverBotResponse(loc.loc('error_medical_emergency'));
       return;
     }
 
@@ -317,19 +406,67 @@ class _CoachScreenState extends State<CoachScreen> {
       final String phase = _userProfile?.phase ?? "Maintenance";
       final String cap = _userProfile?.dynamicDailyCap.toString() ?? "15";
       final String name = _getFirstName();
+      final String clinicalStatus =
+          _userProfile?.clinicalStatus ?? "Preventative";
+      final String ageGroup = _userProfile?.ageGroup ?? "Unknown";
+      final String goal = _userProfile?.primaryGoal ?? "Track limit";
+
+      final String aiLanguage =
+          loc.languageProvider.currentLanguage == 'tl' ? 'Tagalog' : 'English';
+
+      final allItems = await widget.dbService.getPantryItems();
+      final todayItems = allItems
+          .where((i) => i.isConsumed && i.dateScanned.day == DateTime.now().day)
+          .toList();
+      String recentDrinksContext = todayItems.isEmpty
+          ? "No drinks consumed today."
+          : "Drinks consumed today: ${todayItems.map((i) => i.name).join(", ")}.";
 
       String systemPrompt = """
       You are 'Tummy Buddy', the warm, empathetic, and cute AI companion for the TriggerLens app. 
-      Your goal is to help $name manage their GERD and acid reflux with gentle, encouraging behavioral advice.
+      Your goal is to help $name manage their stomach health with gentle, encouraging behavioral advice.
       
-      USER CONTEXT:
-      - Phase: $phase. 
-      - Daily Acid Limit: $cap.
+      STRICT OPERATIONAL BOUNDARIES:
+      - Limit your assistance STRICTLY to commercial powdered drinks, acid reflux, digestion, and TriggerLens metrics.
+      - If the user asks about unrelated topics (coding, general knowledge, other diseases), politely refuse and guide them back to stomach health.
+      - If the user reports a pain severity of 8, 9, or 10, strongly recommend they consult a medical professional immediately.
+      
+      USER MEDICAL CONTEXT:
+      - Clinical Status: $clinicalStatus
+      - Age Group: $ageGroup
+      - Primary Goal: $goal
+      - Phase: $phase
+      - Daily Acid Limit: $cap points
+      - Active Consumption Data: $recentDrinksContext
+      
+      FIRST AID MAPPING:
+      - Globus Sensation: Suggest warm water sips and diaphragmatic breathing.
+      - Acid Regurgitation: Suggest strict upright posture and head elevation.
+      - Dyspepsia: Suggest loosening waistbands and light upright pacing.
+      - Heartburn / Burning Pain: Suggest lukewarm water or sugar-free gum.
+      - Excessive Burping: Suggest avoiding carbonation and sipping slowly.
+      - Nausea: Suggest smelling peppermint oil or rubbing alcohol pads; sip cold water.
+      
+      TRIGGER ANALOGIES:
+      - "Stomach Door Openers": Loosen throat muscle, allowing acid to splash up.
+      - "Stomach Stingers": Irritate sensitive stomach lining like citrus on a cut.
+      - "Traffic Jams": Slow digestion that builds upward pressure.
+      - "Gas Bubbles": Trapped air pushing acid upward.
       """;
 
       if (widget.entryMode == 'scanner' && widget.activeSymptom != null) {
+        String physicalVolumeText = "";
+        if (widget.portionCount != null &&
+            widget.portionMeasurement != null &&
+            widget.drinkCategory != null) {
+          physicalVolumeText =
+              "${widget.portionCount} ${widget.portionMeasurement} of a ${widget.drinkCategory}";
+        } else {
+          physicalVolumeText = "their drink";
+        }
+
         systemPrompt +=
-            "\n- Immediate Context: $name is experiencing ${widget.activeSymptom} at severity ${widget.symptomSeverity}/10 after having ${widget.scannedProduct}. Focus on immediate behavioral first-aid.";
+            "\n- Immediate Context: $name is experiencing ${widget.activeSymptom} at severity ${widget.symptomSeverity}/10 after having $physicalVolumeText (${widget.scannedProduct}). Focus on immediate behavioral first-aid taking this exact physical volume into account.";
       } else if (widget.entryMode == 'insights' &&
           widget.dynamicContextData != null) {
         systemPrompt +=
@@ -338,16 +475,16 @@ class _CoachScreenState extends State<CoachScreen> {
 
       systemPrompt += """
       RULES:
-      1. Use a cozy, empathetic tone. Use gentle emojis (🍵, 🫧, 🧊, ✨, 🧸, 🩹).
-      2. If they mention pain, prioritize immediate behavioral tips (drinking water, sitting upright, avoiding lying down).
-      3. Break advice into short bullet points.
-      4. NEVER diagnose, prescribe, or provide clinical medical advice. You are a behavioral coach.
-      5. End every response with a warm sign-off.
-      6. Keep responses under 60 words.
+      1. Use a cozy, empathetic tone with gentle emojis (🍵, 🫧, 🧊, ✨, 🧸, 🩹).
+      2. Keep responses concise and strictly under 60 words.
+      3. Explain triggers using the friendly Trigger Analogies.
+      4. NEVER prescribe medication or offer clinical diagnoses.
+      5. End every response with a supportive sign-off.
+      6. STRICT RULE: You must respond to the user exclusively in $aiLanguage. Maintain your cute, empathetic tone perfectly translated in $aiLanguage.
       """;
 
       final model = GenerativeModel(
-        model: 'gemini-3.8-flash',
+        model: 'gemini-3.5-flash-lite',
         apiKey: _apiKey,
         systemInstruction: Content.system(systemPrompt),
       );
@@ -362,17 +499,31 @@ class _CoachScreenState extends State<CoachScreen> {
             : Content.model([TextPart(m.text)]);
       }).toList();
 
-      // Fails fast at 15 seconds so you aren't stuck waiting if the emulator network drops
-      final response = await model
-          .generateContent(chatHistory)
-          .timeout(const Duration(seconds: 15));
+      GenerateContentResponse? response;
+      int attempts = 0;
+      const int maxAttempts = 3;
 
-      String cleanText = response.text?.replaceAll(RegExp(r'\*'), '') ??
-          'My connection hiccuped! Can you try again? 🧸';
+      while (attempts < maxAttempts) {
+        try {
+          attempts++;
+          response = await model
+              .generateContent(chatHistory)
+              .timeout(const Duration(seconds: 15));
+          break;
+        } catch (error) {
+          debugPrint("Gemini Attempt $attempts failed: $error");
+          if (attempts >= maxAttempts) rethrow;
+          await Future.delayed(Duration(seconds: attempts));
+        }
+      }
+
+      String cleanText = response?.text?.replaceAll(RegExp(r'\*'), '') ??
+          loc.loc('error_connection_hiccup');
+
       _deliverBotResponse(cleanText.trim());
     } catch (e) {
-      debugPrint("🚨 Gemini API Error: $e");
-      _deliverBotResponse('DEBUG ERROR: $e');
+      debugPrint("🚨 Final Gemini Error after retries: $e");
+      _deliverBotResponse(loc.loc('error_server_unreachable'));
     }
   }
 
@@ -404,37 +555,58 @@ class _CoachScreenState extends State<CoachScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final loc = AppLocalizations.of(context);
+
     if (_isInitializing) {
-      return const Scaffold(
-        backgroundColor: AppColors.background,
-        body:
-            Center(child: CircularProgressIndicator(color: AppColors.primary)),
+      return Scaffold(
+        backgroundColor: colors.background,
+        body: Center(child: CircularProgressIndicator(color: colors.primary)),
       );
     }
 
-    String title = "Tummy Buddy";
-    if (widget.entryMode == 'scanner') title = "First Aid Coach";
-    if (widget.entryMode == 'insights') title = "Insight Analyst";
+    String title = loc.loc('tummy_buddy');
+    if (widget.entryMode == 'scanner') title = loc.loc('tummy_buddy');
+    if (widget.entryMode == 'insights') title = loc.loc('insight_analyst');
+
+    // FIXED: Dynamic Keyboard Hugging logic
+    final bool isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: colors.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
-            icon: Image.asset('assets/images/back_1.png',
-                width: 24, color: AppColors.primaryDark),
-            onPressed: () => Navigator.pop(context)),
+          icon: Image.asset('assets/images/back_1.png',
+              width: 24, color: colors.primaryDark),
+          onPressed: () {
+            if (Navigator.canPop(context)) {
+              Navigator.pop(context);
+            } else {
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => MainLayoutScreen(
+                    dbService: widget.dbService,
+                    initialIndex: 0,
+                  ),
+                ),
+                (route) => false,
+              );
+            }
+          },
+        ),
         title: Text(title,
-            style: const TextStyle(
-                color: AppColors.primaryDark,
+            style: TextStyle(
+                color: colors.primaryDark,
                 fontWeight: FontWeight.w900,
                 fontSize: 22)),
         centerTitle: false,
         actions: [
           IconButton(
             icon: const Icon(Icons.delete_outline, color: Colors.red),
-            tooltip: "Wipe Local Memory",
+            tooltip: loc.loc('clear_chat_q'),
             onPressed: _wipeLocalHistory,
           ),
           const SizedBox(width: 10)
@@ -446,14 +618,14 @@ class _CoachScreenState extends State<CoachScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 6),
-              color: AppColors.primaryLight.withOpacity(0.2),
-              child: const Text(
-                "Chats automatically delete after 14 days. Long-press any message to delete it now.",
+              color: colors.primaryLight.withOpacity(0.2),
+              child: Text(
+                loc.loc('chat_auto_delete_notice'),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
-                    color: AppColors.primaryDark),
+                    color: colors.primaryDark),
               ),
             ),
             Expanded(
@@ -463,41 +635,99 @@ class _CoachScreenState extends State<CoachScreen> {
                     const EdgeInsets.symmetric(horizontal: 25, vertical: 20),
                 itemCount: _messages.length + (_isLoading ? 1 : 0),
                 itemBuilder: (context, index) {
-                  if (index == _messages.length) {
-                    return const Padding(
-                      padding: EdgeInsets.all(20.0),
-                      child: Center(
-                          child: CircularProgressIndicator(
-                              color: AppColors.primary)),
-                    );
+                  if (index == _messages.length && _isLoading) {
+                    return _buildTypingIndicator(colors, loc);
                   }
                   final msg = _messages[index];
                   return msg.isUser
-                      ? _buildUserBubble(msg.text, index)
-                      : _buildCoachBubble(msg.text, index);
+                      ? _buildUserBubble(msg.text, index, colors)
+                      : _buildCoachBubble(msg.text, index, colors);
                 },
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.only(left: 20, right: 20, bottom: 20),
+            if (!_isLoading)
+              Container(
+                height: 40,
+                margin: const EdgeInsets.only(bottom: 10),
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  children: _getDynamicQuickReplies(loc)
+                      .map((reply) => GestureDetector(
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              if (reply == '1' ||
+                                  reply == '3' ||
+                                  reply == '5' ||
+                                  reply == '8' ||
+                                  reply == '10' ||
+                                  reply.toLowerCase() == 'yes' ||
+                                  reply.toLowerCase() == 'no' ||
+                                  reply.toLowerCase() == 'oo' ||
+                                  reply.toLowerCase() == 'hindi') {
+                                _sendMessage(reply);
+                              } else {
+                                setState(() {
+                                  _chatController.text = reply;
+                                  _chatController.selection =
+                                      TextSelection.fromPosition(
+                                          TextPosition(offset: reply.length));
+                                });
+                                FocusScope.of(context)
+                                    .requestFocus(_chatFocusNode);
+                              }
+                            },
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 10),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 16),
+                              decoration: BoxDecoration(
+                                  color: colors.cardColor,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border:
+                                      Border.all(color: colors.primaryLight),
+                                  boxShadow: [
+                                    BoxShadow(
+                                        color: Colors.black.withOpacity(0.04),
+                                        blurRadius: 4,
+                                        offset: const Offset(0, 2))
+                                  ]),
+                              child: Center(
+                                  child: Text(reply,
+                                      style: TextStyle(
+                                          color: colors.primaryDark,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13))),
+                            ),
+                          ))
+                      .toList(),
+                ),
+              ),
+            // FIXED: Dynamic Animated Padding to hug the keyboard and clear the Scanner FAB
+            AnimatedPadding(
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeOutCubic,
+              padding: EdgeInsets.only(
+                  left: 20, right: 20, bottom: isKeyboardOpen ? 20.0 : 95.0),
               child: Container(
                 decoration: BoxDecoration(
-                    gradient: AppColors.primaryGradient,
+                    color: colors.primary,
                     borderRadius: BorderRadius.circular(30),
                     boxShadow: [
                       BoxShadow(
-                          color: AppColors.primary.withOpacity(0.3),
+                          color: colors.primary.withOpacity(0.3),
                           blurRadius: 15,
                           offset: const Offset(0, 5))
                     ]),
                 child: TextField(
                   controller: _chatController,
+                  focusNode: _chatFocusNode,
                   style: const TextStyle(
                       color: Colors.white,
                       fontSize: 14,
                       fontWeight: FontWeight.bold),
                   decoration: InputDecoration(
-                    hintText: 'Tell Tummy Buddy how you feel...',
+                    hintText: loc.loc('chat_hint'),
                     hintStyle: TextStyle(
                         color: Colors.white.withOpacity(0.8), fontSize: 14),
                     border: InputBorder.none,
@@ -506,10 +736,10 @@ class _CoachScreenState extends State<CoachScreen> {
                     suffixIcon: IconButton(
                       icon: Image.asset('assets/images/send.png',
                           color: Colors.white, width: 24),
-                      onPressed: _sendMessage,
+                      onPressed: _isLoading ? null : () => _sendMessage(),
                     ),
                   ),
-                  onSubmitted: (_) => _sendMessage(),
+                  onSubmitted: (_) => _isLoading ? null : _sendMessage(),
                 ),
               ),
             ),
@@ -519,9 +749,75 @@ class _CoachScreenState extends State<CoachScreen> {
     );
   }
 
-  Widget _buildCoachBubble(String text, int index) {
+  Widget _buildTypingIndicator(AppColors colors, AppLocalizations loc) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Container(
+            width: 35,
+            height: 35,
+            decoration: BoxDecoration(
+                color: colors.cardColor,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: colors.primaryLight, width: 2)),
+            child: Padding(
+              padding: const EdgeInsets.all(4.0),
+              child: Image.asset('assets/images/triggerlens_icon.png',
+                  fit: BoxFit.contain),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+              decoration: BoxDecoration(
+                  color: colors.cardColor,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(20),
+                    topRight: Radius.circular(20),
+                    bottomRight: Radius.circular(20),
+                    bottomLeft: Radius.circular(5),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withOpacity(0.04),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4))
+                  ]),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(loc.loc('tummy_buddy_typing'),
+                      style: TextStyle(
+                          color: colors.textGrey,
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: colors.primaryLight),
+                  )
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 40),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCoachBubble(String text, int index, AppColors colors) {
     bool isEmergency = text.contains("⚠️");
-    bool isDebugError = text.contains("DEBUG ERROR");
+    bool isDebugError = text.contains("DEBUG ERROR") ||
+        text.contains("trouble reaching the server") ||
+        text.contains("nahihirapan") ||
+        text.contains("ERROR:");
 
     return GestureDetector(
       onLongPress: () => _deleteSingleMessage(index),
@@ -534,12 +830,12 @@ class _CoachScreenState extends State<CoachScreen> {
               width: 35,
               height: 35,
               decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: colors.cardColor,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                       color: isEmergency || isDebugError
                           ? Colors.red
-                          : AppColors.primaryLight,
+                          : colors.primaryLight,
                       width: 2)),
               child: Padding(
                 padding: const EdgeInsets.all(4.0),
@@ -554,8 +850,10 @@ class _CoachScreenState extends State<CoachScreen> {
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                     color: isEmergency || isDebugError
-                        ? Colors.red.shade50
-                        : Colors.white,
+                        ? (colors.isDark
+                            ? Colors.red.shade900.withOpacity(0.3)
+                            : Colors.red.shade50)
+                        : colors.cardColor,
                     borderRadius: const BorderRadius.only(
                       topLeft: Radius.circular(20),
                       topRight: Radius.circular(20),
@@ -563,7 +861,10 @@ class _CoachScreenState extends State<CoachScreen> {
                       bottomLeft: Radius.circular(5),
                     ),
                     border: isEmergency || isDebugError
-                        ? Border.all(color: Colors.red.shade200)
+                        ? Border.all(
+                            color: colors.isDark
+                                ? Colors.red.shade900
+                                : Colors.red.shade200)
                         : null,
                     boxShadow: [
                       BoxShadow(
@@ -574,8 +875,10 @@ class _CoachScreenState extends State<CoachScreen> {
                 child: Text(text,
                     style: TextStyle(
                         color: isEmergency || isDebugError
-                            ? Colors.red.shade900
-                            : AppColors.textDark,
+                            ? (colors.isDark
+                                ? Colors.red.shade200
+                                : Colors.red.shade900)
+                            : colors.textDark,
                         fontSize: 13,
                         height: 1.5,
                         fontWeight: FontWeight.w600)),
@@ -588,7 +891,7 @@ class _CoachScreenState extends State<CoachScreen> {
     );
   }
 
-  Widget _buildUserBubble(String text, int index) {
+  Widget _buildUserBubble(String text, int index, AppColors colors) {
     return GestureDetector(
       onLongPress: () => _deleteSingleMessage(index),
       child: Padding(
@@ -602,10 +905,7 @@ class _CoachScreenState extends State<CoachScreen> {
               child: Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [
-                    AppColors.primaryLight.withOpacity(0.8),
-                    AppColors.primaryLight
-                  ]),
+                  color: colors.primary,
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(20),
                     topRight: Radius.circular(20),
@@ -615,7 +915,7 @@ class _CoachScreenState extends State<CoachScreen> {
                 ),
                 child: Text(text,
                     style: const TextStyle(
-                        color: AppColors.textDark,
+                        color: Colors.white,
                         fontSize: 14,
                         height: 1.5,
                         fontWeight: FontWeight.w700)),
@@ -626,7 +926,7 @@ class _CoachScreenState extends State<CoachScreen> {
               width: 35,
               height: 35,
               decoration: BoxDecoration(
-                  color: AppColors.primaryLight.withOpacity(0.3),
+                  color: colors.primaryLight.withOpacity(0.3),
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 2),
                   boxShadow: [
